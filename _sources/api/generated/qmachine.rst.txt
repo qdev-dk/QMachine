@@ -14,10 +14,26 @@ Subpackages
 Submodules
 ----------
 
+qmachine.config module
+----------------------
+
+.. automodule:: qmachine.config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 qmachine.hello\_world module
 ----------------------------
 
 .. automodule:: qmachine.hello_world
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+qmachine.qmachine module
+------------------------
+
+.. automodule:: qmachine.qmachine
    :members:
    :undoc-members:
    :show-inheritance:
