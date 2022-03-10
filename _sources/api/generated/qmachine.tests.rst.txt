@@ -1,0 +1,37 @@
+qmachine.tests package
+======================
+
+Submodules
+----------
+
+qmachine.tests.conftest module
+------------------------------
+
+.. automodule:: qmachine.tests.conftest
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+qmachine.tests.test\_config module
+----------------------------------
+
+.. automodule:: qmachine.tests.test_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+qmachine.tests.test\_installation module
+----------------------------------------
+
+.. automodule:: qmachine.tests.test_installation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: qmachine.tests
+   :members:
+   :undoc-members:
+   :show-inheritance:

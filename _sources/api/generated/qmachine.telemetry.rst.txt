@@ -1,0 +1,21 @@
+qmachine.telemetry package
+==========================
+
+Submodules
+----------
+
+qmachine.telemetry.telemetry\_functions module
+----------------------------------------------
+
+.. automodule:: qmachine.telemetry.telemetry_functions
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: qmachine.telemetry
+   :members:
+   :undoc-members:
+   :show-inheritance:

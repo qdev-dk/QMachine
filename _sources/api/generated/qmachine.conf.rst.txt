@@ -1,0 +1,10 @@
+qmachine.conf package
+=====================
+
+Module contents
+---------------
+
+.. automodule:: qmachine.conf
+   :members:
+   :undoc-members:
+   :show-inheritance:

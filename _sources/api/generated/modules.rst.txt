@@ -1,0 +1,7 @@
+qmachine
+========
+
+.. toctree::
+   :maxdepth: 10
+
+   qmachine

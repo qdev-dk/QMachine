@@ -1,0 +1,31 @@
+qmachine package
+================
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 10
+
+   qmachine.conf
+   qmachine.telemetry
+   qmachine.tests
+
+Submodules
+----------
+
+qmachine.hello\_world module
+----------------------------
+
+.. automodule:: qmachine.hello_world
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: qmachine
+   :members:
+   :undoc-members:
+   :show-inheritance:
