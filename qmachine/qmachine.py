@@ -1,6 +1,8 @@
-from qcodes.instrument.base import Instrument, Parameter
+from qcodes.instrument.base import Instrument
+from qcodes.instrument.parameter import Parameter, ParameterWithSetpoints
 from typing import Dict, Optional, Sequence
-from config import *
+from qcodes.utils.validators import Numbers, Arrays
+from qmachine.config import *
 from qm.qua import *
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
@@ -16,22 +18,24 @@ class QMachine(Instrument):
 
 
         with program() as dumbpulse:
+            nn = declare(int)
             n = declare(int)
             I = declare(fixed)
             Q = declare(fixed)
             I_stream = declare_stream()
             Q_stream = declare_stream()
-            with for_(nn,0,nn<1000,nn+1)
-                pause()
+            with for_(nn,0,nn<2,nn+1):
+                #pause()
                 with for_(n,0,n<100,n+1):
                     measure('readout_pulse_0_2', 'Q1_readout', None, demod.full('cos', I), demod.full('sin', Q))
                     save(I, I_stream)
                     save(Q, Q_stream)
 
 
-                with stream_processing():
-                    I_stream.buffer(1).average().save('I')
-                    Q_stream.buffer(1).average().save('Q')
+            with stream_processing():
+                I_stream.buffer(1).average().save('I')
+                Q_stream.buffer(1).average().save('Q')
+            
             self.dumbpulse = dumbpulse
 
             ramp_time = 10e3//4  #//4 turns ns into clock cycles
@@ -77,16 +81,9 @@ class QMachine(Instrument):
                            unit='Vh',
                            get_cmd=self.get_pulse)
 
-        self.add_parameter(name='scan2d',
-                           label='scan2d',
-                           unit='Vh',
-                           vals=vals.Arrays(shape=(self.npts,)),
-                           setpoints=(self.freq_axis, self.freq_axis)
-                           parameter_class=scan2d)
-                        
-        self.add_parameter("freq_axis",
+        self.add_parameter("x_axis",
                             unit="Hz",
-                            label="Freq Axis",
+                            label="X Axis",
                             parameter_class=GeneratedSetPoints,
                             startparam=0,
                             stopparam=1,
@@ -94,10 +91,29 @@ class QMachine(Instrument):
                             vals=Arrays(shape=(100,)),
                             )
 
+        self.add_parameter("y_axis",
+                            unit="Hz",
+                            label="Y Axis",
+                            parameter_class=GeneratedSetPoints,
+                            startparam=0,
+                            stopparam=1,
+                            numpointsparam=100,
+                            vals=Arrays(shape=(100,)),
+                            )
+
+        self.add_parameter(name='scan2d',
+                           label='scan2d',
+                           unit='Vh',
+                           vals=Arrays(shape=(100,100)),
+                           setpoints=(self.x_axis, self.y_axis),
+                           parameter_class=scan2d)
+                        
+
     def run_dumbpulse(self):
         self.job = self.qm.execute(self.dumbpulse)
 
     def get_pulse(self):
+        #self.job = self.qm.execute(self.dumbpulse)
         self.job.resume()
         I_handle = self.job.result_handles.get('I')
         Q_handle = self.job.result_handles.get('Q')
@@ -120,9 +136,11 @@ class QMachine(Instrument):
         return amplitude
 
 class scan2d(ParameterWithSetpoints):
- 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
     def get_raw(self):
-        self.root_instrument.get_scan2d()
+        return self.root_instrument.get_scan2d()
 
 
 class GeneratedSetPoints(Parameter):
@@ -138,4 +156,4 @@ class GeneratedSetPoints(Parameter):
         self._numpointsparam = numpointsparam
 
     def get_raw(self):
-        return np.linspace(self._startparam(), self._stopparam(), self._numpointsparam())
+        return np.linspace(self._startparam, self._stopparam, self._numpointsparam)
