@@ -9,7 +9,8 @@ import versioneer
 
 readme_file_path = Path(__file__).absolute().parent / "README.md"
 
-required_packages = ['opencensus-ext-azure']
+required_packages = ['qcodes',
+                     'qm-qua']
 package_data = {"qmachine": ["conf/telemetry.ini"] }
 
 
