@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pprint
 
-class pulser():
+class Pulser():
     def __init__(self,config) -> None:
         self.config=config
 
@@ -54,7 +54,7 @@ class pulser():
         self.cw_conversion=1/self.config['waveforms']['const_wf']['sample']
 
 
-    def _build_seq(self,actions):
+    def build_seq(self,actions):
         with program() as sequence:
             if 'm1' in actions['channels'] or 'm2' in actions['channels']: #changes here
                 self._declare_measurements(actions)
