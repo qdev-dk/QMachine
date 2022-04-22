@@ -29,7 +29,7 @@ class Pulser():
         samples = job.get_simulated_samples()
         samples.con1.plot()
         # self._plot_simulated_pulse(samples)
-        return samples
+        return job
     
     def _plot_simulated_pulse(self,samples,meas_channel=1):
         fig,ax=plt.subplots()
@@ -55,16 +55,19 @@ class Pulser():
 
 
     def build_seq(self,actions):
+        temp_actions=actions.copy()
         with program() as sequence:
-            if 'm1' in actions['channels'] or 'm2' in actions['channels']: #changes here
-                self._declare_measurements(actions)
+            if 'm1' in temp_actions['channels'] or 'm2' in temp_actions['channels']: #changes here
+                temp_actions = self._declare_measurements(temp_actions)
 
-            if 'looped' in actions.keys(): #changes here
-                loop_indexes,looped_actions = self._declare_loops(actions) #declare loop variables and return dict with loop indexes. and arrays to be looped over.       
-                self._run_loops(loop_indexes=loop_indexes,actions=looped_actions,loop_nr=0) #run_loops will run a single with for_ loop and call itself within this loop. run_loops also will can _run_all_actions.
+            if 'looped' in temp_actions.keys(): #changes here
+                loop_indexes,temp_actions = self._declare_loops(temp_actions) #declare loop variables and return dict with loop indexes. and arrays to be looped over.       
+                self._run_loops(loop_indexes=loop_indexes,actions=temp_actions,loop_nr=0) #run_loops will run a single with for_ loop and call itself within this loop. run_loops also will can _run_all_actions.
             else:
-                self._run_all_actions(actions) #if no loops are to be done it will just run all the actions.
-        return sequence
+                self._run_all_actions(temp_actions) #if no loops are to be done it will just run all the actions.
+
+            self._do_stream_processing(temp_actions)
+        return sequence, temp_actions
 
     def _run_loops(self,loop_indexes,actions,loop_nr=0):
         #check if we are still supposed to loop more
@@ -100,12 +103,16 @@ class Pulser():
         for step,row_actions in actions['steps'].items():
             for key,channel_actions in row_actions.items(): 
                 if 'm' in key:
-                    channel_actions['action_variables']['save_I']=declare(fixed)
+                    channel_actions['action_variables']['save_I']=declare(fixed) #declare save variables
                     channel_actions['action_variables']['save_Q']=declare(fixed)
+
+                    channel_actions['action_variables']['save_I_stream']=declare_stream() #declare streams
+                    channel_actions['action_variables']['save_Q_stream']=declare_stream()
 
                     channel_actions['action_variables']['I_name']=f'I_{k}'
                     channel_actions['action_variables']['Q_name']=f'Q_{k}'
                     k+=1
+        return actions
                     
 
                     
@@ -124,11 +131,23 @@ class Pulser():
         play('CW'*amp(variables['step_value']), self.channel_dict[channel], duration=variables['time'])
 
     def _make_meas(self,channel,variables):
+        #this measure syntax only works for 'type'='full', will have to rewrite with if statements for 'sliced' and 'raw_adc' once that is implemented
         measure(variables['pulse'],self.channel_dict[channel],None,
                 self.meas_dict[variables['type']]('cos',variables['save_I']), 
                 self.meas_dict[variables['type']]('sin',variables['save_Q']))
 
+        save(variables['save_I'],variables['save_I_stream'])
+        save(variables['save_Q'],variables['save_Q_stream'])
 
+    def _do_stream_processing(self,actions):
+        with stream_processing():
+            for step,row_actions in actions['steps'].items():
+                for key,channel_actions in row_actions.items():
+                    if 'm' in key:
+                        pprint.pprint(channel_actions)
+                        #some more things to be implemented: averaging, buffering to a specific size
+                        channel_actions['action_variables']['save_I_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
+                        channel_actions['action_variables']['save_Q_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
 
 
 #below is legacy for now, will return to it when above is done.
