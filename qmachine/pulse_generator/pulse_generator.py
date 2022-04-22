@@ -144,10 +144,11 @@ class Pulser():
             for step,row_actions in actions['steps'].items():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
-                        pprint.pprint(channel_actions)
+                        # pprint.pprint(channel_actions)
                         #some more things to be implemented: averaging, buffering to a specific size
-                        channel_actions['action_variables']['save_I_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
-                        channel_actions['action_variables']['save_Q_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
+                        print(channel_actions['action_variables']['buffer_size'])
+                        channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
+                        channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
 
 
 #below is legacy for now, will return to it when above is done.
