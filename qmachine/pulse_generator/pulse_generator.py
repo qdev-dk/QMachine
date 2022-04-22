@@ -19,6 +19,8 @@ class Pulser():
 
         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas}
         self.cw_conversion=1
+        self.readout_length=config['pulses']['readout_pulse_0_2']['length']
+        print(f'readout length: {self.readout_length}ns')
 
         # self.open_qm(config)
 
@@ -103,14 +105,31 @@ class Pulser():
         for step,row_actions in actions['steps'].items():
             for key,channel_actions in row_actions.items(): 
                 if 'm' in key:
-                    channel_actions['action_variables']['save_I']=declare(fixed) #declare save variables
-                    channel_actions['action_variables']['save_Q']=declare(fixed)
+                    if channel_actions['action_variables']['type']=='sliced':
+                        slice_length=int(self.readout_length/4/channel_actions["action_variables"]["slices"])
+                        print(f'slice length={slice_length}')
+                        channel_actions['action_variables']['slice_length']=slice_length
+                        channel_actions['action_variables']['save_I']=declare(fixed,size=slice_length) #declare save variables
+                        channel_actions['action_variables']['save_Q']=declare(fixed,size=slice_length)
 
-                    channel_actions['action_variables']['save_I_stream']=declare_stream() #declare streams
-                    channel_actions['action_variables']['save_Q_stream']=declare_stream()
+                        channel_actions['action_variables']['save_I_stream']=declare_stream() #declare streams
+                        channel_actions['action_variables']['save_Q_stream']=declare_stream()
 
-                    channel_actions['action_variables']['I_name']=f'I_{k}'
-                    channel_actions['action_variables']['Q_name']=f'Q_{k}'
+                        channel_actions['action_variables']['I_name']=f'I_{k}'
+                        channel_actions['action_variables']['Q_name']=f'Q_{k}'
+                        if not hasattr(self,'sliced_indexer'):
+                            self.sliced_indexer=declare(int)
+                        # pprint.pprint(channel_actions)
+
+                    else:
+                        channel_actions['action_variables']['save_I']=declare(fixed) #declare save variables
+                        channel_actions['action_variables']['save_Q']=declare(fixed)
+
+                        channel_actions['action_variables']['save_I_stream']=declare_stream() #declare streams
+                        channel_actions['action_variables']['save_Q_stream']=declare_stream()
+
+                        channel_actions['action_variables']['I_name']=f'I_{k}'
+                        channel_actions['action_variables']['Q_name']=f'Q_{k}'
                     k+=1
         return actions
                     
@@ -132,12 +151,22 @@ class Pulser():
 
     def _make_meas(self,channel,variables):
         #this measure syntax only works for 'type'='full', will have to rewrite with if statements for 'sliced' and 'raw_adc' once that is implemented
-        measure(variables['pulse'],self.channel_dict[channel],None,
-                self.meas_dict[variables['type']]('cos',variables['save_I']), 
-                self.meas_dict[variables['type']]('sin',variables['save_Q']))
+        if variables['type']=='sliced':
+            measure(variables['pulse'],self.channel_dict[channel],None,
+                    self.meas_dict[variables['type']]('cos',variables['save_I'],variables['slice_length'],variables['analog_output']), 
+                    self.meas_dict[variables['type']]('sin',variables['save_Q'],variables['slice_length'],variables['analog_output']))
+            # pprint.pprint(variables)
+            with for_(self.sliced_indexer,0,self.sliced_indexer<variables['slices'],self.sliced_indexer+1):
+                save(variables['save_I'][self.sliced_indexer],variables['save_I_stream'])
+                save(variables['save_Q'][self.sliced_indexer],variables['save_Q_stream'])
 
-        save(variables['save_I'],variables['save_I_stream'])
-        save(variables['save_Q'],variables['save_Q_stream'])
+        else:
+            measure(variables['pulse'],self.channel_dict[channel],None,
+                    self.meas_dict[variables['type']]('cos',variables['save_I'],variables['analog_output']), 
+                    self.meas_dict[variables['type']]('sin',variables['save_Q'],variables['analog_output']))
+
+            save(variables['save_I'],variables['save_I_stream'])
+            save(variables['save_Q'],variables['save_Q_stream'])
 
     def _do_stream_processing(self,actions):
         with stream_processing():
@@ -145,8 +174,8 @@ class Pulser():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
                         # pprint.pprint(channel_actions)
-                        #some more things to be implemented: averaging, buffering to a specific size
-                        print(channel_actions['action_variables']['buffer_size'])
+                        #some more things to be implemented: averaging
+                        # print(channel_actions['action_variables']['buffer_size'])
                         channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
                         channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
 

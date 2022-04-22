@@ -1,7 +1,7 @@
 import numpy as np
 #router ip 192.168.15.128
 
-readout_length = 1000
+readout_length = 10000
 
 Q1_readout_frequency = 156390000
 Q2_readout_frequency = 129291200
