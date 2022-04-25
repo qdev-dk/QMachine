@@ -173,9 +173,7 @@ class Pulser():
             for step,row_actions in actions['steps'].items():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
-                        # pprint.pprint(channel_actions)
                         #some more things to be implemented: averaging
-                        # print(channel_actions['action_variables']['buffer_size'])
                         channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
                         channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
 
