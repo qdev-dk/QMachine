@@ -29,8 +29,8 @@ class Pulser():
             self.open_qm(self.config)
         job = self.qm.simulate(pulsing_sequence, SimulationConfig(simulation_time))
         samples = job.get_simulated_samples()
-        samples.con1.plot()
-        # self._plot_simulated_pulse(samples)
+        #samples.con1.plot()
+        self._plot_simulated_pulse(samples)
         return job
     
     def _plot_simulated_pulse(self,samples,meas_channel=1):
@@ -147,7 +147,7 @@ class Pulser():
         play(ramp(variables['rate']), self.channel_dict[channel], duration=variables['time'])
 
     def _make_step(self,channel,variables):
-        play('CW'*amp(variables['step_value']), self.channel_dict[channel], duration=variables['time'])
+        play('CW'*amp(variables['step_value']*self.cw_conversion), self.channel_dict[channel], duration=variables['time'])
 
     def _make_meas(self,channel,variables):
         #this measure syntax only works for 'type'='full', will have to rewrite with if statements for 'sliced' and 'raw_adc' once that is implemented
@@ -174,8 +174,8 @@ class Pulser():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
                         #some more things to be implemented: averaging
-                        channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
-                        channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
+                        channel_actions['action_variables']['save_I_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
+                        channel_actions['action_variables']['save_Q_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
 
 
 #below is legacy for now, will return to it when above is done.
