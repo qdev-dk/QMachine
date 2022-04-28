@@ -1,5 +1,5 @@
 # from config import config
-from qm.qua import program,for_,stream_processing,declare,declare_stream,wait,measure,play,save,fixed,demod,ramp,amp,if_,elif_,else_,align
+from qm.qua import program,for_,stream_processing,declare,declare_stream,wait,measure,play,save,fixed,demod,ramp,amp,if_,elif_,else_,align, ramp_to_zero
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
 
@@ -17,40 +17,49 @@ class Pulser():
         self.channel_dict={'ch1':'Q1_L' , 'ch2':'Q1_R', 'm1':'Q2_readout'}
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
-        self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas}
+        self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
         self.cw_conversion=1
         self.readout_length=config['pulses']['readout_pulse_0_2']['length']
         print(f'readout length: {self.readout_length}ns')
 
         # self.open_qm(config)
 
-    def simulate_pulse(self,pulsing_sequence,simulation_time):
+    def simulate_pulse(self,pulsing_sequence,simulation_time,close_others=False):
         if not hasattr(self,'qm'):
-            self.open_qm(self.config)
+            self.open_qm(self.config,close_others)
         job = self.qm.simulate(pulsing_sequence, SimulationConfig(simulation_time))
         samples = job.get_simulated_samples()
         #samples.con1.plot()
-        self._plot_simulated_pulse(samples)
-        return job
+        fig,ax=self._plot_simulated_pulse(samples)
+        return job, samples ,(fig,ax)
     
     def _plot_simulated_pulse(self,samples,meas_channel=1):
         fig,ax=plt.subplots()
         ax2=ax.twinx()
         measurement_on_points=np.where(samples.con1.analog[str(meas_channel)]!=0)
-        ax.plot(samples.con1.analog['3'])
-        ax.plot(samples.con1.analog['2'])
+        ax.plot(samples.con1.analog['3'],label='ch2')
+        ax.plot(samples.con1.analog['2'],label='ch1')
+        ax.hlines(0,0,len(samples.con1.analog['3']))
+        # fig.canvas.draw()
+        # y_ticks=ax.get_yticklabels()
+        # ax.set_yticklabels([float(y_tick.get_text())*1e3 for y_tick in y_ticks])
+        # ax.set_ylabel('mV')
         ax2.plot(measurement_on_points,np.ones(len(measurement_on_points)),'.')
         ax2.set_ylim(0,1.05)
+        fig.legend()
+        plt.show()
+        return fig,ax
         
         
 
 
-    def open_qm(self,config):
+    def open_qm(self,config,close_others=False):
         #load the quantum machine this should probably only be done when simulating/performing the pulse
         self.config=config
         self.qmm = QuantumMachinesManager(host='192.168.15.128',port=80)
-        self.qmm.close_all_quantum_machines()
-        self.qm = self.qmm.open_qm(config)
+        if close_others:
+            self.qmm.close_all_quantum_machines()
+        self.qm = self.qmm.open_qm(config,close_other_machines=False)
         print(f"quantum machine opened with channels {list(self.config['elements'].keys())}")
         print(f"default value for CW is: {self.config['waveforms']['const_wf']['sample']}")
         self.cw_conversion=1/self.config['waveforms']['const_wf']['sample']
@@ -148,6 +157,9 @@ class Pulser():
 
     def _make_step(self,channel,variables):
         play('CW'*amp(variables['step_value']*self.cw_conversion), self.channel_dict[channel], duration=variables['time'])
+
+    def _make_ramp_to_zero(self,channel,variables):
+        ramp_to_zero(self.channel_dict[channel],variables['time'])
 
     def _make_meas(self,channel,variables):
         #this measure syntax only works for 'type'='full', will have to rewrite with if statements for 'sliced' and 'raw_adc' once that is implemented
