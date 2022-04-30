@@ -14,7 +14,7 @@ class Pulser():
 
         self.channels=['ch1','ch2']
         
-        self.channel_dict={'ch1':'Q1_L' , 'ch2':'Q1_R', 'm1':'Q2_readout'}
+        self.channel_dict={'ch1':'Q1_L' , 'ch2':'Q1_R', 'm1':'Q1_readout','m2':'Q2_readout'}
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
@@ -27,10 +27,11 @@ class Pulser():
     def simulate_pulse(self,pulsing_sequence,simulation_time,close_others=False):
         if not hasattr(self,'qm'):
             self.open_qm(self.config,close_others)
+        fig,ax=None,None
         job = self.qm.simulate(pulsing_sequence, SimulationConfig(simulation_time))
         samples = job.get_simulated_samples()
-        #samples.con1.plot()
-        fig,ax=self._plot_simulated_pulse(samples)
+        samples.con1.plot()
+        # fig,ax=self._plot_simulated_pulse(samples)
         return job, samples ,(fig,ax)
     
     def _plot_simulated_pulse(self,samples,meas_channel=1):
@@ -39,7 +40,7 @@ class Pulser():
         measurement_on_points=np.where(samples.con1.analog[str(meas_channel)]!=0)
         ax.plot(samples.con1.analog['3'],label='ch2')
         ax.plot(samples.con1.analog['2'],label='ch1')
-        ax.hlines(0,0,len(samples.con1.analog['3']))
+        # ax.hlines(0,0,len(samples.con1.analog['3']))
         # fig.canvas.draw()
         # y_ticks=ax.get_yticklabels()
         # ax.set_yticklabels([float(y_tick.get_text())*1e3 for y_tick in y_ticks])
@@ -116,10 +117,11 @@ class Pulser():
                 if 'm' in key:
                     if channel_actions['action_variables']['type']=='sliced':
                         slice_length=int(self.readout_length/4/channel_actions["action_variables"]["slices"])
-                        print(f'slice length={slice_length}')
+                        print(f'slice length (chunk size in qua terms)={slice_length}')
+
                         channel_actions['action_variables']['slice_length']=slice_length
-                        channel_actions['action_variables']['save_I']=declare(fixed,size=slice_length) #declare save variables
-                        channel_actions['action_variables']['save_Q']=declare(fixed,size=slice_length)
+                        channel_actions['action_variables']['save_I']=declare(fixed,size=channel_actions["action_variables"]["slices"]) #declare save variables
+                        channel_actions['action_variables']['save_Q']=declare(fixed,size=channel_actions["action_variables"]["slices"])
 
                         channel_actions['action_variables']['save_I_stream']=declare_stream() #declare streams
                         channel_actions['action_variables']['save_Q_stream']=declare_stream()
@@ -186,8 +188,8 @@ class Pulser():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
                         #some more things to be implemented: averaging
-                        channel_actions['action_variables']['save_I_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['I_name'])
-                        channel_actions['action_variables']['save_Q_stream'].buffer(channel_actions['action_variables']['buffer_size']).save(channel_actions['action_variables']['Q_name'])
+                        channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['I_name'])
+                        channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['Q_name'])
 
 
 #below is legacy for now, will return to it when above is done.

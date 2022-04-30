@@ -100,7 +100,6 @@ config = {
             },
             "intermediate_frequency": Q2_readout_frequency,
             "operations": {
-                "readout_pulse_1_danger": "readout_pulse_1_danger",
                 "readout_pulse_0_05": "readout_pulse_0_05",
                 "readout_pulse_0_2": "readout_pulse_0_2",
             },
@@ -117,17 +116,6 @@ config = {
             "operation": "control",
             "length": 100,
             "waveforms": {"single": "const_wf"},
-        },
-
-        "readout_pulse_1_danger": {
-            "operation": "measurement",
-            "length": readout_length,
-            "waveforms": {"single": "readout_wf_1_danger"},
-            "integration_weights": {
-                "cos": "cos",
-                "sin": "sin",
-            },
-            'digital_marker': 'ON'
         },
 
         "readout_pulse_0_2": {
@@ -200,9 +188,7 @@ config = {
         "const_wf": {"type": "constant", "sample": 0.1}, #previously this "sample": 0.05*7.063 
 
         "zero_wf": {"type": "constant", "sample": 0.0},
-
-        "readout_wf_1_danger": {"type": "constant", "sample": 1},
-
+        
         "readout_wf_0_2": {"type": "constant", "sample": 0.2},
 
         "readout_wf_0_1": {"type": "constant", "sample": 0.1},
