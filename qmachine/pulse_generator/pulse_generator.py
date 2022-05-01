@@ -69,6 +69,7 @@ class Pulser():
     def build_seq(self,actions):
         temp_actions=actions.copy()
         with program() as sequence:
+            self.cw_conversion_dec =declare(fixed,value=self.cw_conversion)
             if 'm1' in temp_actions['channels'] or 'm2' in temp_actions['channels']: #changes here
                 temp_actions = self._declare_measurements(temp_actions)
 
@@ -103,6 +104,7 @@ class Pulser():
 
     def _declare_loops(self,actions):
         loop_indexes={str(i):declare(int) for i in range(len(actions['looped']))} #declares all the loop indexes
+
         for step,row_actions in actions['steps'].items():
             for key,channel_actions in row_actions.items():
                 if 'ch' in key:
@@ -158,13 +160,13 @@ class Pulser():
         play(ramp(variables['rate']), self.channel_dict[channel], duration=variables['time'])
 
     def _make_step(self,channel,variables):
+        #amp argument is limited to -2 to 2, cw conversion should likely be applied outside of this function, precalculating everything will reduce opx load.
         play('CW'*amp(variables['step_value']*self.cw_conversion), self.channel_dict[channel], duration=variables['time'])
 
     def _make_ramp_to_zero(self,channel,variables):
         ramp_to_zero(self.channel_dict[channel],variables['time'])
 
     def _make_meas(self,channel,variables):
-        #this measure syntax only works for 'type'='full', will have to rewrite with if statements for 'sliced' and 'raw_adc' once that is implemented
         if variables['type']=='sliced':
             measure(variables['pulse'],self.channel_dict[channel],None,
                     self.meas_dict[variables['type']]('cos',variables['save_I'],variables['slice_length'],variables['analog_output']), 
@@ -187,7 +189,7 @@ class Pulser():
             for step,row_actions in actions['steps'].items():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
-                        #some more things to be implemented: averaging
+                        #some more things to be implemented: averaging, figure out buffer size rework
                         channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['I_name'])
                         channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['Q_name'])
 
