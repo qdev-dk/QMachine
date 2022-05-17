@@ -10,7 +10,7 @@ from qcodes.utils.validators import Numbers, Arrays
 
 class QMachine(Instrument):
 
-    def __init__(self, name, config,N=100,single_averages=1000,map_size=(50,50),map_averages=1, **kwargs):
+    def __init__(self, name, config,n_slices=100,single_averages=1000,map_size=(50,50),map_averages=1, **kwargs):
         super().__init__(name, **kwargs)
         
         self.map_size=map_size
@@ -23,7 +23,7 @@ class QMachine(Instrument):
         self.qm = self.qmm.open_qm(config, close_other_machines=False)
 
         self.single_pulse_id = self.single_value_measurement(single_averages)
-        self.time_pulse_id = self.sliced_measurement(num_of_slices=N,readout_length=self.readout_length)
+        self.time_pulse_id = self.sliced_measurement(num_of_slices=n_slices,readout_length=self.readout_length)
 
 
         self.add_parameter(name="x_axis",
@@ -32,8 +32,8 @@ class QMachine(Instrument):
                             parameter_class=GeneratedSetPoints,
                             startparam=0,
                             stopparam=self.readout_length*1e-9,
-                            numpointsparam=N,
-                            vals=Arrays(shape=(N,)),
+                            numpointsparam=n_slices,
+                            vals=Arrays(shape=(n_slices,)),
                             )
 
         self.add_parameter(name="x_axis_buff",
@@ -73,7 +73,7 @@ class QMachine(Instrument):
         self.add_parameter(name='time_pulse_meas',
                            label='Time Pulse Meas',
                            unit='Vh',
-                           vals=Arrays(shape=(N,)),
+                           vals=Arrays(shape=(n_slices,)),
                            setpoints=(self.x_axis,),
                            parameter_class=pulse_class)
 
