@@ -115,9 +115,13 @@ class Pulser():
     def _declare_measurements(self,actions):
         k=1
         for step,row_actions in actions['steps'].items():
-            for key,channel_actions in row_actions.items(): 
+            for key,channel_actions in row_actions.items():
+                # print(key) 
                 if 'm' in key:
+                    # print('m here')
                     if channel_actions['action_variables']['type']=='sliced':
+                        # print('and here')
+                        
                         slice_length=int(self.readout_length/4/channel_actions["action_variables"]["slices"])
                         print(f'slice length (chunk size in qua terms)={slice_length}')
 
@@ -168,6 +172,7 @@ class Pulser():
 
     def _make_meas(self,channel,variables):
         if variables['type']=='sliced':
+            # pprint.pprint(variables)
             measure(variables['pulse'],self.channel_dict[channel],None,
                     self.meas_dict[variables['type']]('cos',variables['save_I'],variables['slice_length'],variables['analog_output']), 
                     self.meas_dict[variables['type']]('sin',variables['save_Q'],variables['slice_length'],variables['analog_output']))
@@ -190,8 +195,8 @@ class Pulser():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
                         #some more things to be implemented: averaging, figure out buffer size rework
-                        channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['I_name'])
-                        channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['Q_name'])
+                        channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).average().save(channel_actions['action_variables']['I_name'])
+                        channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).average().save(channel_actions['action_variables']['Q_name'])
 
 
 #below is legacy for now, will return to it when above is done.
