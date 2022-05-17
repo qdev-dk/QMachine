@@ -1,147 +1,274 @@
+from qm.qua import wait_for_trigger,reset_phase,program,update_frequency,for_,stream_processing,declare,declare_stream,wait,measure,play,save,fixed,demod,ramp,amp,if_,elif_,else_,align, ramp_to_zero
+from qm.QuantumMachinesManager import QuantumMachinesManager
+from qm import SimulationConfig
+import time as time
+import numpy as np
 from qcodes.instrument.base import Instrument
 from qcodes.instrument.parameter import Parameter, ParameterWithSetpoints
 from typing import Dict, Optional, Sequence
 from qcodes.utils.validators import Numbers, Arrays
-from qmachine.config import *
-from qm.qua import *
-from qm.QuantumMachinesManager import QuantumMachinesManager
-from qm import SimulationConfig
 
 class QMachine(Instrument):
 
-    def __init__(self, name, host, port, **kwargs):
+    def __init__(self, name, config,N=100,single_averages=1000,map_size=(50,50),map_averages=1, **kwargs):
         super().__init__(name, **kwargs)
-        self.qmm = QuantumMachinesManager(host=host, port=port)
-        self.qmm.close_all_quantum_machines()
-        self.qm = self.qmm.open_qm(config)
-        self.job = None
+        
+        self.map_size=map_size
+        self.map_averages=map_averages
+        self.config=config
+        self.readout_length=config['pulses']['readout_pulse_0_2']['length']
+        # self.buffered_acq_id = self.buffered_acq(map_size,averages)
+        self.qmm = QuantumMachinesManager(host='192.168.15.128',port=80)
+        #qmm.close_all_quantum_machines()
+        self.qm = self.qmm.open_qm(config, close_other_machines=False)
+
+        self.single_pulse_id = self.single_value_measurement(single_averages)
+        self.time_pulse_id = self.sliced_measurement(num_of_slices=N,readout_length=self.readout_length)
 
 
-        with program() as dumbpulse:
-            nn = declare(int)
-            n = declare(int)
+        self.add_parameter(name="x_axis",
+                            unit="s",
+                            label="time",
+                            parameter_class=GeneratedSetPoints,
+                            startparam=0,
+                            stopparam=self.readout_length*1e-9,
+                            numpointsparam=N,
+                            vals=Arrays(shape=(N,)),
+                            )
+
+        self.add_parameter(name="x_axis_buff",
+                            unit="a.u.",
+                            label="voltage ",
+                            parameter_class=GeneratedSetPoints,
+                            startparam=0,
+                            stopparam=1,
+                            numpointsparam=self.map_size[0],
+                            vals=Arrays(shape=(self.map_size[0],)),
+                            )
+        
+        self.add_parameter(name="y_axis_buff",
+                            unit="a.u.",
+                            label="voltage ",
+                            parameter_class=GeneratedSetPoints,
+                            startparam=0,
+                            stopparam=1,
+                            numpointsparam=self.map_size[1],
+                            vals=Arrays(shape=(self.map_size[1],)),
+                            )
+
+        self.add_parameter(name='buffered_acq_phase',
+                           label='Buffered_acq_phase',
+                           unit='Vh',
+                           vals=Arrays(shape=(self.map_size[0],self.map_size[1])), 
+                           setpoints=(self.x_axis_buff,self.y_axis_buff),
+                           parameter_class=buffered_pulse_class_phase)
+
+        self.add_parameter(name='buffered_acq_amp',
+                           label='Buffered_acq_amp',
+                           unit='Vh',
+                           vals=Arrays(shape=(self.map_size[0],self.map_size[1])), 
+                           setpoints=(self.x_axis_buff,self.y_axis_buff),
+                           parameter_class=buffered_pulse_class_amp)
+
+        self.add_parameter(name='time_pulse_meas',
+                           label='Time Pulse Meas',
+                           unit='Vh',
+                           vals=Arrays(shape=(N,)),
+                           setpoints=(self.x_axis,),
+                           parameter_class=pulse_class)
+
+        self.add_parameter(name='single_pulse_meas_amp',
+                           label='single pulse meas amplitude',
+                           unit='Vh',
+                           get_cmd=self.get_single_pulse)
+
+        self.add_parameter(name='single_pulse_meas_phase',
+                           label='single pulse meas phase',
+                           unit='a.u.',
+                           get_cmd=self.get_single_pulse_phase)
+
+    def prepare_buffered_acq(self,map_size,averages=1):
+        self.map_size=map_size
+        self.average=averages
+
+        self.y_axis_buff.vals=Arrays(shape=(map_size[1],))
+        self.y_axis_buff.num_points_param=map_size[1]
+        
+        self.x_axis_buff.vals=Arrays(shape=(map_size[0],))
+        self.x_axis_buff.num_points_param=map_size[0]
+
+        self.buffered_acq_phase.vals=Arrays(shape=(map_size[0],map_size[1]))
+        self.buffered_acq_amp.vals=Arrays(shape=(map_size[0],map_size[1]))
+        
+        self.buffered_acq_id=self.buffered_acq(map_size,averages)
+
+    def get_single_pulse(self):
+        p_job = self.qm.queue.add_compiled(self.single_pulse_id)
+        job=p_job.wait_for_execution()
+        I_handle = job.result_handles.get('I')
+        Q_handle = job.result_handles.get('Q')
+        Q_handle.wait_for_all_values()
+        I_handle.wait_for_all_values()
+        results_I = I_handle.fetch_all()
+        results_Q = Q_handle.fetch_all()
+        job.halt()
+        return np.sqrt(results_I**2 + results_Q**2)
+
+    def get_single_pulse_phase(self):
+        p_job = self.qm.queue.add_compiled(self.single_pulse_id)
+        job=p_job.wait_for_execution()
+        I_handle = job.result_handles.get('I')
+        Q_handle = job.result_handles.get('Q')
+        Q_handle.wait_for_all_values()
+        I_handle.wait_for_all_values()
+        results_I = I_handle.fetch_all()
+        results_Q = Q_handle.fetch_all()
+        job.halt()
+        return np.arctan2(results_Q,results_I)
+
+    def start_buffered_acq(self,):
+        p_job = self.qm.queue.add_compiled(self.buffered_acq_id)
+        self.buffered_acq_job=p_job.wait_for_execution()
+        
+    def get_buffered_acq_phase(self,job=None):
+        job = self.buffered_acq_job
+        I_handle = job.result_handles.get('I')
+        Q_handle = job.result_handles.get('Q')
+        Q_handle.wait_for_all_values()
+        I_handle.wait_for_all_values()
+        results_I = I_handle.fetch_all()
+        results_Q = Q_handle.fetch_all()
+        job.halt()
+        return np.arctan2(results_Q,results_I)
+
+    def get_buffered_acq_amp(self,job=None):
+        job = self.buffered_acq_job
+        I_handle = job.result_handles.get('I')
+        Q_handle = job.result_handles.get('Q')
+        Q_handle.wait_for_all_values()
+        I_handle.wait_for_all_values()
+        results_I = I_handle.fetch_all()
+        results_Q = Q_handle.fetch_all()
+        job.halt()
+        return np.sqrt(results_Q**2+results_I**2)
+
+    def buffered_acq(self,map_size,averages): 
+        with program() as buff_pulse:
+            avg=declare(int)
+            n=declare(int) 
             I = declare(fixed)
             Q = declare(fixed)
             I_stream = declare_stream()
             Q_stream = declare_stream()
-            with for_(nn,0,nn<2,nn+1):
-                #pause()
-                with for_(n,0,n<100,n+1):
-                    measure('readout_pulse_0_2', 'Q1_readout', None, demod.full('cos', I), demod.full('sin', Q))
-                    save(I, I_stream)
-                    save(Q, Q_stream)
+            # i = declare(int)
+            total_pixels=int(np.prod(map_size))
+            with for_(avg,0,avg<int(averages),avg+1):
+                wait_for_trigger('bottom_right_DQD_readout')
+                with for_(n, 0, n<total_pixels, n+1):
+                    measure('readout_pulse_0_2', 'bottom_right_DQD_readout', None, demod.full('cos', I), demod.full('sin', Q))
 
+                    save(I,I_stream)
+                    save(Q,Q_stream)
 
+                
             with stream_processing():
-                I_stream.buffer(1).average().save('I')
-                Q_stream.buffer(1).average().save('Q')
-            
-            self.dumbpulse = dumbpulse
+                I_stream.buffer(*map_size).save('I')
+                Q_stream.buffer(*map_size).save('Q')
+        # I_stream.save('I')
+        # Q_stream.save('Q')
+    
+    
+        return self.qm.compile(buff_pulse)
 
-            ramp_time = 10e3//4  #//4 turns ns into clock cycles
-            sweep_width = 50  #mV
-            attenuation_L12 = 8.891
-            rate = (sweep_width*attenuation_L12)*1e-3/(4*ramp_time)
+    def sliced_measurement(self,num_of_slices,readout_length):
+        # num_of_slices = int(50)
+        # readout_length=config['pulses']['readout_pulse_0_2']['length']
+        # print(readout_length)
+        slice_length = int((readout_length//4)/num_of_slices)  #//4 makes it into clock cycles
+        # N = 1 
+        # total_pulse_time = readout_length*N
+        # N_time_pulse = N*num_of_slices
 
-            num_of_slices = 100
-            slice_length = int(ramp_time//num_of_slices)
-
-            da = 0.01
-
-
-        with program() as twodscan:
-            #From here
-            a = declare(fixed)
-            n = declare(int)
-            I = declare(fixed, size=num_of_slices)
-            Q = declare(fixed, size=num_of_slices)
+        with program() as time_pulse:
+            # n=declare(int)
+            I = declare(fixed,size=num_of_slices)
+            Q = declare(fixed,size=num_of_slices)
             I_stream = declare_stream()
             Q_stream = declare_stream()
             i = declare(int)
+            # with for_(n, 0, n<int(N), n+1):
+            measure('readout_pulse_0_2', 'bottom_right_DQD_readout', None, demod.sliced('cos', I, slice_length, 'out1'), demod.sliced('sin', Q, slice_length, 'out1'))
+            with for_(i, 0, i<num_of_slices, i+1):
+                save(I[i], I_stream)
+                save(Q[i], Q_stream)
 
-            with for_(n, 0, n<2e3, n+1):  #number of averages
-                with for_(a, 0.0, a < 1.0 - da*0.5, a + da):  #adding the '- da*0.5 ' makes it unequivocal that the last value is not included. this is important for looping over fixed/floating values. *0.5 is way faster than /2, as division adds a 400ns overhead.
-                    # reset_phase('Q1_readout')  #legacy
-                    play('CW'*amp(a), 'Q1_L', duration=ramp_time)
-                    #wait(500, 'Q1_R')  #legacy
-                    #wait(500, 'Q1_readout')  #legacy
-                    play(ramp(rate), 'Q1_R', duration=ramp_time)
-                    measure('readout_pulse_0_2', 'Q1_readout', None, demod.sliced('cos', I, slice_length, 'out1'), demod.sliced('sin', Q, slice_length, 'out1'))
-                    with for_(i, 0, i<num_of_slices, i+1):
-                        save(I[i], I_stream)
-                        save(Q[i], Q_stream)
-                    #wait(4000)  #legacy
+                    
             with stream_processing():
-                I_stream.buffer(100,100).average().save('I')
-                Q_stream.buffer(100,100).average().save('Q')
-        self.twodscan = twodscan
+                I_stream.buffer(num_of_slices).save('I')
+                Q_stream.buffer(num_of_slices).save('Q')
 
-        self.add_parameter(name='pulse_meas',
-                           label='pulse_meas',
-                           unit='Vh',
-                           get_cmd=self.get_pulse)
+        return self.qm.compile(time_pulse)
 
-        self.add_parameter("x_axis",
-                            unit="Hz",
-                            label="X Axis",
-                            parameter_class=GeneratedSetPoints,
-                            startparam=0,
-                            stopparam=1,
-                            numpointsparam=100,
-                            vals=Arrays(shape=(100,)),
-                            )
+    def single_value_measurement(self,num_of_averages):
+        # num_of_averages=1000
+        with program() as single_pulse:
+            n=declare(int) 
+            I = declare(fixed)
+            Q = declare(fixed)
+            I_stream = declare_stream()
+            Q_stream = declare_stream()
+            # i = declare(int)
+            with for_(n, 0, n<num_of_averages, n+1):
+                measure('readout_pulse_0_2', 'bottom_right_DQD_readout', None, demod.full('cos', I), demod.full('sin', Q))
+                save(I,I_stream)
+                save(Q,Q_stream)
 
-        self.add_parameter("y_axis",
-                            unit="Hz",
-                            label="Y Axis",
-                            parameter_class=GeneratedSetPoints,
-                            startparam=0,
-                            stopparam=1,
-                            numpointsparam=100,
-                            vals=Arrays(shape=(100,)),
-                            )
+                    
+            with stream_processing():
+                I_stream.buffer(1).average().save('I')
+                Q_stream.buffer(1).average().save('Q')
+                # I_stream.save('I')
+                # Q_stream.save('Q')
 
-        self.add_parameter(name='scan2d',
-                           label='scan2d',
-                           unit='Vh',
-                           vals=Arrays(shape=(100,100)),
-                           setpoints=(self.x_axis, self.y_axis),
-                           parameter_class=scan2d)
-                        
+        return self.qm.compile(single_pulse)
 
-    def run_dumbpulse(self):
-        self.job = self.qm.execute(self.dumbpulse)
 
-    def get_pulse(self):
-        #self.job = self.qm.execute(self.dumbpulse)
-        self.job.resume()
-        I_handle = self.job.result_handles.get('I')
-        Q_handle = self.job.result_handles.get('Q')
+
+    def get_time_pulse(self):
+        p_job = self.qm.queue.add_compiled(self.time_pulse_id)
+        job=p_job.wait_for_execution()
+        I_handle = job.result_handles.get('I')
+        Q_handle = job.result_handles.get('Q')
         Q_handle.wait_for_all_values()
         I_handle.wait_for_all_values()
         results_I = I_handle.fetch_all()
         results_Q = Q_handle.fetch_all()
-        # job.halt()
+        job.halt()
         return results_I**2 + results_Q**2
 
-    def get_scan2d(self):
-        self.job = self.qm.execute(self.twodscan)
-        I_handle = self.job.result_handles.get('I')
-        Q_handle = self.job.result_handles.get('Q')
-        I_handle.wait_for_all_values()
-        Q_handle.wait_for_all_values()
-        results_I = I_handle.fetch_all()
-        results_Q = Q_handle.fetch_all()
-        amplitude = results_I**2 + results_Q**2
-        return amplitude
 
-class scan2d(ParameterWithSetpoints):
+        
+class pulse_class(ParameterWithSetpoints):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
     def get_raw(self):
-        return self.root_instrument.get_scan2d()
+        return self.root_instrument.get_time_pulse()
 
+class buffered_pulse_class_phase(ParameterWithSetpoints):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def get_raw(self):
+        return self.root_instrument.get_buffered_acq_phase()
+
+class buffered_pulse_class_amp(ParameterWithSetpoints):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def get_raw(self):
+        return self.root_instrument.get_buffered_acq_amp()
+        
 
 class GeneratedSetPoints(Parameter):
     """
