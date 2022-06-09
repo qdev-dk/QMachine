@@ -202,6 +202,31 @@ class Pulser():
                         channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).average().save_all(channel_actions['action_variables']['Q_name'])
 
 
+class Pulse_builder():
+    def __init__(self,dividers):
+        self.dividers=dividers
+
+    def make_dict(self,df):
+        pass
+
+    def _hold_action(self,channel,time,looped=False):
+        return {'action':'hold' , 'channel':channel , 'action_variables':{'time':time},'looped':looped}
+
+    def _step_action(self,channel,value,time,looped=False,looped_variable='step_value',loop_index=0):
+        return {'action':'step' , 'channel':channel , 'action_variables':{'time':time,'step_value':value},'looped':looped,'looper':looped_variable,'loop_index':loop_index}
+
+    def _ramp_action(self,channel,rate,time,looped=False):
+        return {'action':'ramp' , 'channel':channel , 'action_variables':{'time':time,'rate':rate},'looped':looped}
+
+    def _meas_action(self,channel,type='full',pulse='readout_pulse_0_05',looped=False,buffer_size=16,slices=100,analog_output='out1'):
+        return {'action':'meas' , 'channel':channel , 'action_variables':{'type':type , 'pulse':pulse,'buffer_size':buffer_size,'slices':slices,'analog_output':analog_output},'looped':looped}
+
+    def _ramp_to_zero_action(self,channel,time=None):
+        return {'action':'ramp_to_zero','channel':channel,'action_variables':{'time':time},'looped':False}
+
+
+
+
 #below is legacy for now, will return to it when above is done.
 # class pulse_generator():
 #     def __init__(self,config):
