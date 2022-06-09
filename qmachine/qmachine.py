@@ -10,7 +10,7 @@ from qcodes.utils.validators import Numbers, Arrays
 
 class QMachine(Instrument):
 
-    def __init__(self, name, config,n_slices=100,single_averages=1000,map_size=(50,50),map_averages=1, **kwargs):
+    def __init__(self, name, config,close_others=False,n_slices=100,single_averages=50,map_size=(50,50),map_averages=1, **kwargs):
         super().__init__(name, **kwargs)
         
         self.map_size=map_size
@@ -20,7 +20,7 @@ class QMachine(Instrument):
         # self.buffered_acq_id = self.buffered_acq(map_size,averages)
         self.qmm = QuantumMachinesManager(host='192.168.15.128',port=80)
         #qmm.close_all_quantum_machines()
-        self.qm = self.qmm.open_qm(config, close_other_machines=False)
+        self.qm = self.qmm.open_qm(config, close_other_machines=close_others)
 
         self.single_pulse_id = self.single_value_measurement(single_averages)
         self.time_pulse_id = self.sliced_measurement(num_of_slices=n_slices,readout_length=self.readout_length)
