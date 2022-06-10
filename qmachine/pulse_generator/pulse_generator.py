@@ -205,9 +205,32 @@ class Pulser():
 class Pulse_builder():
     def __init__(self,dividers):
         self.dividers=dividers
+        
 
-    def make_dict(self,df):
-        pass
+    def make_dict(self,df,measpulse='readout_pulse_10ms',zero_offset=True,ramp_to_zero=True):
+        self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i]
+        self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
+
+        self.actions_dict = {'steps':{},'channels':self.channels}
+        df['time'] = df['time'].map(lambda x : int(x/4*1000)) #time from us to clockcycles
+        for channel in self.channels:
+            if 'ch' in channel:
+                df[channel] = df[channel].map(self._str_to_float)
+
+        self.in_loop = False
+        self.measpulse = measpulse
+
+        
+        for index,row in df.iterrows():
+            self.actions_dict[str(index+1)]=self._identify_actions(row)
+            if index>1:
+                break
+
+    def _str_to_float(self,input):
+        input = input.split(',')
+        input = [float(i) for i in input]
+        return input
+    
 
     def _hold_action(self,channel,time,looped=False):
         return {'action':'hold' , 'channel':channel , 'action_variables':{'time':time},'looped':looped}
@@ -218,12 +241,92 @@ class Pulse_builder():
     def _ramp_action(self,channel,rate,time,looped=False):
         return {'action':'ramp' , 'channel':channel , 'action_variables':{'time':time,'rate':rate},'looped':looped}
 
-    def _meas_action(self,channel,type='full',pulse='readout_pulse_0_05',looped=False,buffer_size=16,slices=100,analog_output='out1'):
+    def _meas_action(self,channel,type='full',pulse='readout_pulse_0_2',looped=False,buffer_size=16,slices=100,analog_output='out1'):
         return {'action':'meas' , 'channel':channel , 'action_variables':{'type':type , 'pulse':pulse,'buffer_size':buffer_size,'slices':slices,'analog_output':analog_output},'looped':looped}
 
     def _ramp_to_zero_action(self,channel,time=None):
         return {'action':'ramp_to_zero','channel':channel,'action_variables':{'time':time},'looped':False}
 
+    def _identify_actions(self,row):
+        actions={}
+        for channel in self.channels:
+            action,looped=self._channel_action(row[channel],channel)
+            if not action=='do_nothing':
+                actions[channel]=self._get_variables(action,row,channel)
+        return actions
+
+    def _channel_action(self,input,channel):
+        if 'm' in channel:
+            if input:
+                return 'meas' ,False
+            else:
+                return 'do_nothing', False
+        else:
+            if len(input)==1: #step or hold
+                if input[0]==self.current_position[channel]:
+                    return 'hold' , False
+                else:
+                    return 'step' , False   
+
+            elif len(input)==2: #ramp
+                return 'ramp' , False
+
+            elif len(input)==3:
+                return 'loop' , True
+
+
+    def _get_variables(self,action,row,channel):
+        if action=='hold':
+            return self._hold_action(channel,row['time'])
+
+        if action=='step':
+            step=row[channel][0]-self.current_position[channel][-1]
+            self.current_position[channel].append(row[channel][0]) #update position
+            return self._step_action(channel,step,row['time'])
+
+        if action=='ramp':
+            rate=(row[channel][1]-self.current_position[channel][-1])/(row['time']*4) #times 4 to account for clockcycles to ns
+            self.current_position[channel].append(row[channel][1])
+            return self._ramp_action(channel,rate,row['time'])
+
+        if action=='meas':
+            pass
+            # if channel=='m11':
+            #     mtype = 'full'
+            # elif channel=='m22':
+            #     mtype = 'sliced'
+
+            # return self._meas_action(channel,mtype,self.measpulse,)
+
+        if action=='loop':
+            pass
+            # startvalue=row[channel][0]-self.position[channel]
+            # endvalue=row[channel][1]-self.position[channel]
+            # steps=row[channel][2]
+            # stepsize=(endvalue-startvalue)/steps
+            # return {'time': row['time'] , 'stepsize':stepsize , 'start':startvalue, 'end':endvalue , 'steps':steps}
+
+
+
+    def _make_zero_avg(self,df,channel):
+        other_cols=[i for i in df.columns.values if 'ch' not in i and 'm1' not in i and 'm2' not in i]
+        channel_df=df[[channel]+other_cols].copy(deep=True)
+        total_offset=0
+        for index,row in channel_df.iterrows():
+            row[channel]=row[channel].split(',')
+            if len(row[channel])==1:
+                total_offset+=float(row[channel][0])*float(row['time'])
+            if len(row[channel])==2:
+                
+                total_offset+=(float(row[channel][1])+float(row[channel][0]))/2*float(row['time']) #ramp
+            if len(row[channel])==3:
+                total_offset+=np.linspace(float(row[channel][0]),float(row[channel][1]),int(row[channel][2]))*float(row['time'])
+            # print(total_offset)
+
+        return self._calc_offset_comp(self,total_offset)
+
+    def _calc_offset_comp(self,offset,correction_len=30):
+        return offset/correction_len
 
 
 
