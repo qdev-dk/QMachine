@@ -8,6 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pprint
 
+from xarray import corr
+
 class Pulser():
     def __init__(self,config) -> None:
         self.config=config
@@ -207,24 +209,41 @@ class Pulse_builder():
         self.dividers=dividers
         
 
-    def make_dict(self,df,measpulse='readout_pulse_10ms',zero_offset=True,ramp_to_zero=True):
+    def make_dict(self,df,measpulse='readout_pulse_10ms',averages=0,zero_offset=True,ramp_to_zero=True):
         self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i]
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
+        self.next_loop_index = 0
 
-        self.actions_dict = {'steps':{},'channels':self.channels}
+        self.actions_dict = {'steps':{},'channels':self.channels,'looped':[]}
+        if averages!=0:
+            self.actions_dict['looped'].append(averages)
+            self.next_loop_index+=1
+
         df['time'] = df['time'].map(lambda x : int(x/4*1000)) #time from us to clockcycles
         for channel in self.channels:
             if 'ch' in channel:
                 df[channel] = df[channel].map(self._str_to_float)
 
-        self.in_loop = False
+        self.in_loop = {ch : False for ch in self.channels}
         self.measpulse = measpulse
 
         
         for index,row in df.iterrows():
-            self.actions_dict[str(index+1)]=self._identify_actions(row)
-            if index>1:
-                break
+            self.actions_dict['steps'][str(index+1)]=self._identify_actions(row)
+
+        if zero_offset:
+            index+=2
+            self.actions_dict['steps'][str(index)]={}
+            for channel in self.channels:
+                if 'ch' in channel:
+                    self.actions_dict['steps'][str(index)][channel]=self._zero_avg_action(df,channel,correction_length=30000)
+
+        if ramp_to_zero:
+            index+=1
+            self.actions_dict['steps'][str(index)]={}
+            for channel in self.channels:
+                if 'ch' in channel:
+                    self.actions_dict['steps'][str(index)][channel]=self._ramp_to_zero_action(channel)
 
     def _str_to_float(self,input):
         input = input.split(',')
@@ -244,13 +263,18 @@ class Pulse_builder():
     def _meas_action(self,channel,type='full',pulse='readout_pulse_0_2',looped=False,buffer_size=16,slices=100,analog_output='out1'):
         return {'action':'meas' , 'channel':channel , 'action_variables':{'type':type , 'pulse':pulse,'buffer_size':buffer_size,'slices':slices,'analog_output':analog_output},'looped':looped}
 
-    def _ramp_to_zero_action(self,channel,time=None):
+    def _ramp_to_zero_action(self,channel,time=0):
         return {'action':'ramp_to_zero','channel':channel,'action_variables':{'time':time},'looped':False}
+
+    def _zero_avg_action(self,df,channel,correction_length=30000):
+        corr_value = self._make_zero_avg(df,channel,correction_length)
+        corr_value = corr_value - self.current_position[channel][-1]
+        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looped':False}
 
     def _identify_actions(self,row):
         actions={}
         for channel in self.channels:
-            action,looped=self._channel_action(row[channel],channel)
+            action=self._channel_action(row[channel],channel)
             if not action=='do_nothing':
                 actions[channel]=self._get_variables(action,row,channel)
         return actions
@@ -258,21 +282,23 @@ class Pulse_builder():
     def _channel_action(self,input,channel):
         if 'm' in channel:
             if input:
-                return 'meas' ,False
+                return 'meas' 
             else:
-                return 'do_nothing', False
+                return 'do_nothing'
         else:
             if len(input)==1: #step or hold
-                if input[0]==self.current_position[channel]:
-                    return 'hold' , False
+                if self.in_loop:
+                    return 'step'
+                if input[0]==self.current_position[channel][-1]:
+                    return 'hold'
                 else:
-                    return 'step' , False   
+                    return 'step' 
 
             elif len(input)==2: #ramp
-                return 'ramp' , False
+                return 'ramp' 
 
             elif len(input)==3:
-                return 'loop' , True
+                return 'loop' 
 
 
     def _get_variables(self,action,row,channel):
@@ -280,6 +306,8 @@ class Pulse_builder():
             return self._hold_action(channel,row['time'])
 
         if action=='step':
+            if self.in_loop[channel]:
+                return self._looped_return_step(row,channel)
             step=row[channel][0]-self.current_position[channel][-1]
             self.current_position[channel].append(row[channel][0]) #update position
             return self._step_action(channel,step,row['time'])
@@ -290,43 +318,49 @@ class Pulse_builder():
             return self._ramp_action(channel,rate,row['time'])
 
         if action=='meas':
-            pass
-            # if channel=='m11':
-            #     mtype = 'full'
-            # elif channel=='m22':
-            #     mtype = 'sliced'
+            if channel=='m11':
+                mtype = 'full'
+            elif channel=='m22':
+                mtype = 'sliced'
 
-            # return self._meas_action(channel,mtype,self.measpulse,)
+            return self._meas_action(channel,mtype,self.measpulse,)
 
         if action=='loop':
-            pass
-            # startvalue=row[channel][0]-self.position[channel]
-            # endvalue=row[channel][1]-self.position[channel]
-            # steps=row[channel][2]
-            # stepsize=(endvalue-startvalue)/steps
-            # return {'time': row['time'] , 'stepsize':stepsize , 'start':startvalue, 'end':endvalue , 'steps':steps}
+            startvalue=row[channel][0]-self.current_position[channel][-1]
+            endvalue=row[channel][1]-self.current_position[channel][-1]
+            steps=row[channel][2]
+            if len(self.actions_dict['looped'])<=self.next_loop_index:
+                self.actions_dict['looped'].append(int(steps))
+            self.in_loop[channel]=True
+            values = np.linspace(startvalue,endvalue,int(steps))
+            self.current_position[channel].append(values)
+            return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index)
 
+    def _looped_return_step(self,row,channel):
+        values = row[channel][0]-self.current_position[channel][-1]
+        self.current_position[channel].append(row[channel][0])
+        self.next_loop_index+=1
+        self.in_loop[channel]=False
+        return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index-1)
 
-
-    def _make_zero_avg(self,df,channel):
+    def _make_zero_avg(self,df,channel,correction_length=30000):
         other_cols=[i for i in df.columns.values if 'ch' not in i and 'm1' not in i and 'm2' not in i]
         channel_df=df[[channel]+other_cols].copy(deep=True)
         total_offset=0
         for index,row in channel_df.iterrows():
-            row[channel]=row[channel].split(',')
             if len(row[channel])==1:
-                total_offset+=float(row[channel][0])*float(row['time'])
+                total_offset+=row[channel][0]*row['time']
             if len(row[channel])==2:
                 
-                total_offset+=(float(row[channel][1])+float(row[channel][0]))/2*float(row['time']) #ramp
+                total_offset+=(row[channel][1]+row[channel][0])/2*row['time'] #ramp
             if len(row[channel])==3:
-                total_offset+=np.linspace(float(row[channel][0]),float(row[channel][1]),int(row[channel][2]))*float(row['time'])
+                total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*row['time']
             # print(total_offset)
 
-        return self._calc_offset_comp(self,total_offset)
+        return total_offset/correction_length
 
-    def _calc_offset_comp(self,offset,correction_len=30):
-        return offset/correction_len
+    # def _calc_offset_comp(self,offset,correction_len=30):
+    #     return offset/correction_len
 
 
 
