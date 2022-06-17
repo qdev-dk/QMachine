@@ -212,22 +212,24 @@ class Pulse_builder():
     def make_dict(self,df,measpulse='readout_pulse_10ms',averages=0,zero_offset=True,ramp_to_zero=True):
         self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i]
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
-        self.next_loop_index = 0
+        self.next_loop_index = {}
 
         self.actions_dict = {'steps':{},'channels':self.channels,'looped':[]}
         if averages!=0:
             self.actions_dict['looped'].append(averages)
-            self.next_loop_index+=1
 
         df['time'] = df['time'].map(lambda x : int(x/4*1000)) #time from us to clockcycles
         for channel in self.channels:
             if 'ch' in channel:
+                self.next_loop_index[channel] = 0
+                if averages!=0:
+                    self.next_loop_index[channel]+=1
                 df[channel] = df[channel].map(self._str_to_float)
 
         self.in_loop = {ch : False for ch in self.channels}
+        self.containts_loops = {ch : False for ch in self.channels}
         self.measpulse = measpulse
 
-        
         for index,row in df.iterrows():
             self.actions_dict['steps'][str(index+1)]=self._identify_actions(row)
 
@@ -245,6 +247,14 @@ class Pulse_builder():
                 if 'ch' in channel:
                     self.actions_dict['steps'][str(index)][channel]=self._ramp_to_zero_action(channel)
 
+        if any(list(self.containts_loops.values())):
+            # for key,value1 in self.actions_dict['steps'].items():
+            #     for key,value in value1.items():
+            #         if value['looped']:
+            #             value['loop_index']=str(value['loop_index'])
+            if zero_offset:
+                print('WARNING: Making zero offset is only done with innermost loop.') 
+
     def _str_to_float(self,input):
         input = input.split(',')
         input = [float(i) for i in input]
@@ -255,7 +265,7 @@ class Pulse_builder():
         return {'action':'hold' , 'channel':channel , 'action_variables':{'time':time},'looped':looped}
 
     def _step_action(self,channel,value,time,looped=False,looped_variable='step_value',loop_index=0):
-        return {'action':'step' , 'channel':channel , 'action_variables':{'time':time,'step_value':value},'looped':looped,'looper':looped_variable,'loop_index':loop_index}
+        return {'action':'step' , 'channel':channel , 'action_variables':{'time':time,'step_value':value},'looped':looped,'looper':looped_variable,'loop_index':str(loop_index)}
 
     def _ramp_action(self,channel,rate,time,looped=False):
         return {'action':'ramp' , 'channel':channel , 'action_variables':{'time':time,'rate':rate},'looped':looped}
@@ -269,7 +279,7 @@ class Pulse_builder():
     def _zero_avg_action(self,df,channel,correction_length=30000):
         corr_value = self._make_zero_avg(df,channel,correction_length)
         corr_value = corr_value - self.current_position[channel][-1]
-        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looped':False}
+        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looped':self.containts_loops[channel],'loop_index':str(len(self.actions_dict['looped'])-1)}
 
     def _identify_actions(self,row):
         actions={}
@@ -329,19 +339,20 @@ class Pulse_builder():
             startvalue=row[channel][0]-self.current_position[channel][-1]
             endvalue=row[channel][1]-self.current_position[channel][-1]
             steps=row[channel][2]
-            if len(self.actions_dict['looped'])<=self.next_loop_index:
+            if len(self.actions_dict['looped'])<=self.next_loop_index[channel]:
                 self.actions_dict['looped'].append(int(steps))
             self.in_loop[channel]=True
+            self.containts_loops[channel]=True
             values = np.linspace(startvalue,endvalue,int(steps))
             self.current_position[channel].append(values)
-            return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index)
+            return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index[channel])
 
     def _looped_return_step(self,row,channel):
         values = row[channel][0]-self.current_position[channel][-1]
         self.current_position[channel].append(row[channel][0])
-        self.next_loop_index+=1
+        self.next_loop_index[channel]+=1
         self.in_loop[channel]=False
-        return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index-1)
+        return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index[channel]-1)
 
     def _make_zero_avg(self,df,channel,correction_length=30000):
         other_cols=[i for i in df.columns.values if 'ch' not in i and 'm1' not in i and 'm2' not in i]
@@ -355,169 +366,6 @@ class Pulse_builder():
                 total_offset+=(row[channel][1]+row[channel][0])/2*row['time'] #ramp
             if len(row[channel])==3:
                 total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*row['time']
-            # print(total_offset)
+
 
         return total_offset/correction_length
-
-    # def _calc_offset_comp(self,offset,correction_len=30):
-    #     return offset/correction_len
-
-
-
-#below is legacy for now, will return to it when above is done.
-# class pulse_generator():
-#     def __init__(self,config):
-#         self.config=config
-#         self.position={'ch1':0,'ch2':0}
-
-  
-#         self.channels=['ch1','ch2']
-        
-#         self.channel_dict={'ch1':'Q1_L' , 'ch2':'Q1_R'}
-
-#         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'loop':self._make_step}
-
-#         self.open_qm(config)
-
-        
-#     def make_pulse_from_df(self,df):
-#         self.other_cols=[i for i in df.columns.values if 'ch' not in i]
-#         dfcopy=df.copy(deep=True)
-#         dfcopy['time']=dfcopy['time'].apply(lambda x : int(x//4)) #converts time to clockcycles of the fpga (4ns)
-
-        
-#         actions={ch : {} for ch in self.channels}
-#         for channel in self.channels:
-#             channel_df=dfcopy[[channel]+self.other_cols].copy(deep=True)
-
-#             for index,row in channel_df.iterrows():
-#                 if isinstance(row[channel],(float,int)):
-#                     row[channel]=[row[channel]]
-#                 actions[channel][str(index)]=self._identify_actions(row,channel)
-
-#                 self._update_position(row,channel)
-#                 # print(f'my position is now {self.position}')
-#                 # print(f"this row {row[self.channels].values} was assigned this action {actions[-1][0][0],actions[-1][1][0]}")
-#         loops=self._check_loop(actions)
-#         if loops['found']:
-#             self._fix_loop_channel(loops['where'],actions)
-#         # return actions
-#         return self._build_seq(actions) , actions
-        
-#     def simulate_pulse(self,pulsing_sequence,simulation_time):
-#         if not hasattr(self,'qm'):
-#             self.open_qm(self.config)
-#         job = self.qm.simulate(pulsing_sequence, SimulationConfig(simulation_time))
-#         samples = job.get_simulated_samples()
-#         samples.con1.plot()
-
-
-#     def open_qm(self,config):
-#         #load the quantum machine this should probably only be done when simulating/performing the pulse
-#         self.config=config
-#         self.qmm = QuantumMachinesManager(host='192.168.15.128',port=80)
-#         self.qmm.close_all_quantum_machines()
-#         self.qm = self.qmm.open_qm(config)
-#         print(f"quantum machine opened with channels {list(self.config['elements'].keys())}")
-#         print(f"default value for CW is: {self.config['waveforms']['const_wf']['sample']}")
-#         self.cw_conversion=1/self.config['waveforms']['const_wf']['sample']
-    
-
-
-#     def _build_seq(self,actions):
-#         # loop_present=False
-#         # for ac in actions:
-#         #     for a in ac:
-#         #         if a[0]=='loop':
-#         #             loop_present=True
-#         #             loop_variables=a[2]
-#         #             print('loop_present')    
-
-#         with program() as sequence:
-#             #declare things
-#             # if loop_present:
-#             #     print('im here')
-#             #     self._make_the_loop(loop_variables,actions)
-#             # else:
-#             for i in range(len(actions['ch1'])):
-#                 for ch in self.channels:
-#                     self._perform_action(actions[ch][str(i)])
-#         return sequence
-    
- 
-#     def _perform_action(self,action):
-#         self.action_dict[action['action']](action['channel'],action['action_variables'])
-
-    
-#     def _update_position(self,row,channel):
-#         if len(row[channel])==3: #loop
-#             print('loop not implemented yet')
-
-#         elif len(row[channel])==2: #ramp move
-#             self.position[channel]=row[channel][1]
-            
-#         else: #step or hold
-#             self.position[channel]=row[channel][0]
-
-#     def _check_loop(self,actions):
-#         loops={'where':{ch:[] for ch in self.channels}, 'found':False}
-#         for channel,di in actions.items():
-#             for step,di2 in di.items():
-#                 if di2['action']=='loop':
-#                     loops[channel].append(step)
-#                     loops['found']=True
-                
-#         return loops
-    
-#     def _fix_loop_channel(self,where,actions):
-#         print('fix the loop channel')
-
-#     def _make_wait(self,channel,variables):
-#         wait(variables['time'],self.channel_dict[channel])
-
-#     def _make_ramp(self,channel,variables):
-#         print(f'rate is {variables["rate"]}V/ns with time {variables["time"]*4}ns')
-#         play(ramp(variables['rate']), self.channel_dict[channel], duration=variables['time'])
-
-#     def _make_step(self,channel,variables):
-#         play('CW'*amp(self.cw_conversion*variables['step_value']), self.channel_dict[channel], duration=variables['time'])
-
-#     def _identify_actions(self,row,channel):
-#         # actions={}
-#         action=self._channel_action(channel,row[channel])
-#         action_variables=self._get_variables(action,row,channel)
-#         action={'action':action , 'channel':channel, 'action_variables':action_variables}
-#         return action
-
-#     def _get_variables(self,action,row,channel):
-#         if action=='hold':
-#             return {'time':row['time']}
-
-#         if action=='step':
-#             step=row[channel][0]-self.position[channel]
-#             return {'time':row['time'] , 'step_value':step}
-
-#         if action=='ramp':
-#             rate=(row[channel][1]-self.position[channel])/(row['time']*4) #times 4 to account for clockcycles to ns
-#             return {'rate':rate , 'time': row['time']}
-
-#         if action=='loop':
-#             startvalue=row[channel][0]-self.position[channel]
-#             endvalue=row[channel][1]-self.position[channel]
-#             steps=row[channel][2]
-#             stepsize=(endvalue-startvalue)/steps
-#             return {'time': row['time'] , 'stepsize':stepsize , 'start':startvalue, 'end':endvalue , 'steps':steps}
-
-
-#     def _channel_action(self,channel,input):
-#         if len(input)==1: #step or hold
-#             if input[0]==self.position[channel]:
-#                 return 'hold'
-#             else:
-#                 return 'step'    
-
-#         elif len(input)==2: #ramp
-#             return 'ramp'
-
-#         elif len(input)==3:
-#             return 'loop'
