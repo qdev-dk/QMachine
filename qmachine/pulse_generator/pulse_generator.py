@@ -2,6 +2,7 @@
 from qm.qua import program,for_,stream_processing,declare,declare_stream,wait,measure,play,save,fixed,demod,ramp,amp,if_,elif_,else_,align, ramp_to_zero
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
+from qm import generate_qua_script
 
 import pandas
 import numpy as np
@@ -16,13 +17,13 @@ class Pulser():
 
         self.channels=['ch1','ch2']
         
-        self.channel_dict={'ch1':'gate_36' , 'ch2':'gate_29', 'm1':'bottom_right_DQD_readout'}
+        self.channel_dict={'ch1':'gate_36' , 'ch2':'gate_29', 'm11':'bottom_right_DQD_readout'}
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
         
         self.cw_conversion=1/config['waveforms']['const_wf']['sample']
-        self.readout_length=config['pulses']['readout_pulse_0_2']['length']
+        self.readout_length=config['pulses']['readout_pulse_10us']['length']
         print(f'readout length: {self.readout_length}ns')
 
         # self.open_qm(config)
@@ -36,6 +37,10 @@ class Pulser():
         samples.con1.plot()
         # fig,ax=self._plot_simulated_pulse(samples)
         return job, samples ,(fig,ax)
+
+    def seq_to_py(self,seq,filename):
+        with open(filename,'w') as file:
+            print(generate_qua_script(seq,self.config) , file = file)
     
     def _plot_simulated_pulse(self,samples,meas_channel=1):
         fig,ax=plt.subplots()
@@ -69,11 +74,11 @@ class Pulser():
         self.cw_conversion=1/self.config['waveforms']['const_wf']['sample']
 
 
-    def build_seq(self,actions):
+    def build_seq(self,actions,buffer_size=0):
         temp_actions=actions.copy()
         with program() as sequence:
             # self.cw_conversion_dec =declare(fixed,value=self.cw_conversion)
-            if 'm1' in temp_actions['channels'] or 'm2' in temp_actions['channels']: #changes here FB why m2?
+            if 'm11' in temp_actions['channels'] or 'm12' in temp_actions['channels']: #changes here FB why m2?
                 temp_actions = self._declare_measurements(temp_actions)
 
             if 'looped' in temp_actions.keys(): #changes here
@@ -82,7 +87,7 @@ class Pulser():
             else:
                 self._run_all_actions(temp_actions) #if no loops are to be done it will just run all the actions.
 
-            self._do_stream_processing(temp_actions)
+            self._do_stream_processing(temp_actions,buffer_size)
         return sequence, temp_actions
 
     def _run_loops(self,loop_indexes,actions,loop_nr=0):
@@ -194,22 +199,25 @@ class Pulser():
             save(variables['save_I'],variables['save_I_stream'])
             save(variables['save_Q'],variables['save_Q_stream'])
 
-    def _do_stream_processing(self,actions):
+    def _do_stream_processing(self,actions,buffer_size):
         with stream_processing():
             for step,row_actions in actions['steps'].items():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
-                        #some more things to be implemented: averaging, figure out buffer size rework
-                        channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).average().save_all(channel_actions['action_variables']['I_name']) #
-                        channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).average().save_all(channel_actions['action_variables']['Q_name'])
-
-
+                        if buffer_size!=0:
+                            #some more things to be implemented: averaging, figure out buffer size rework
+                            channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['I_name']) #
+                            channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['Q_name'])
+                        else:
+                            channel_actions['action_variables']['save_I_stream'].save_all(channel_actions['action_variables']['I_name']) #
+                            channel_actions['action_variables']['save_Q_stream'].save_all(channel_actions['action_variables']['Q_name'])
 class Pulse_builder():
     def __init__(self,dividers):
         self.dividers=dividers
         
 
-    def make_dict(self,df,measpulse='readout_pulse_10ms',averages=0,zero_offset=True,ramp_to_zero=True):
+    def make_dict(self,df,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True):
+        df = df.copy()
         self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i]
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
         self.next_loop_index = {}
@@ -225,6 +233,7 @@ class Pulse_builder():
                 if averages!=0:
                     self.next_loop_index[channel]+=1
                 df[channel] = df[channel].map(self._str_to_float)
+                df[channel] = df[channel].map(self._apply_dividers(channel))
 
         self.in_loop = {ch : False for ch in self.channels}
         self.containts_loops = {ch : False for ch in self.channels}
@@ -248,18 +257,23 @@ class Pulse_builder():
                     self.actions_dict['steps'][str(index)][channel]=self._ramp_to_zero_action(channel)
 
         if any(list(self.containts_loops.values())):
-            # for key,value1 in self.actions_dict['steps'].items():
-            #     for key,value in value1.items():
-            #         if value['looped']:
-            #             value['loop_index']=str(value['loop_index'])
             if zero_offset:
                 print('WARNING: Making zero offset is only done with innermost loop.') 
+        
+        return self.actions_dict, df
 
     def _str_to_float(self,input):
         input = input.split(',')
         input = [float(i) for i in input]
         return input
-    
+
+    def _apply_dividers(self,channel):
+        def application(input):
+            for i,n in enumerate(input):
+                if i<2:
+                    input[i]=n*self.dividers[channel]
+            return input
+        return application
 
     def _hold_action(self,channel,time,looped=False):
         return {'action':'hold' , 'channel':channel , 'action_variables':{'time':time},'looped':looped}
@@ -270,16 +284,16 @@ class Pulse_builder():
     def _ramp_action(self,channel,rate,time,looped=False):
         return {'action':'ramp' , 'channel':channel , 'action_variables':{'time':time,'rate':rate},'looped':looped}
 
-    def _meas_action(self,channel,type='full',pulse='readout_pulse_0_2',looped=False,buffer_size=16,slices=100,analog_output='out1'):
+    def _meas_action(self,channel,type='full',pulse='readout_pulse_10us',looped=False,buffer_size=16,slices=100,analog_output='out1'):
         return {'action':'meas' , 'channel':channel , 'action_variables':{'type':type , 'pulse':pulse,'buffer_size':buffer_size,'slices':slices,'analog_output':analog_output},'looped':looped}
 
-    def _ramp_to_zero_action(self,channel,time=0):
+    def _ramp_to_zero_action(self,channel,time=1):
         return {'action':'ramp_to_zero','channel':channel,'action_variables':{'time':time},'looped':False}
 
     def _zero_avg_action(self,df,channel,correction_length=30000):
         corr_value = self._make_zero_avg(df,channel,correction_length)
         corr_value = corr_value - self.current_position[channel][-1]
-        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looped':self.containts_loops[channel],'loop_index':str(len(self.actions_dict['looped'])-1)}
+        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looper':'step_value','looped':self.containts_loops[channel],'loop_index':str(len(self.actions_dict['looped'])-1)}
 
     def _identify_actions(self,row):
         actions={}
