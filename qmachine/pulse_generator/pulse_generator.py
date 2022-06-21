@@ -382,4 +382,4 @@ class Pulse_builder():
                 total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*row['time']
 
 
-        return total_offset/correction_length
+        return -total_offset/correction_length
