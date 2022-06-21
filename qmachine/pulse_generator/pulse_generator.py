@@ -369,17 +369,17 @@ class Pulse_builder():
         return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index[channel]-1)
 
     def _make_zero_avg(self,df,channel,correction_length=30000):
-        other_cols=[i for i in df.columns.values if 'ch' not in i and 'm1' not in i and 'm2' not in i]
-        channel_df=df[[channel]+other_cols].copy(deep=True)
+        # other_cols=[i for i in df.columns.values if 'ch' not in i and 'm1' not in i and 'm2' not in i]
+        # channel_df=df[[channel]+other_cols].copy(deep=True)
+        correction_length=correction_length/4
         total_offset=0
-        for index,row in channel_df.iterrows():
+        for index,row in df.iterrows():
             if len(row[channel])==1:
                 total_offset+=row[channel][0]*row['time']
             if len(row[channel])==2:
-                
                 total_offset+=(row[channel][1]+row[channel][0])/2*row['time'] #ramp
             if len(row[channel])==3:
                 total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*row['time']
 
-
+        # print(f'{channel} correction: {-total_offset/correction_length}')
         return -total_offset/correction_length
