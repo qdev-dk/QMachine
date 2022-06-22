@@ -12,18 +12,18 @@ import pprint
 from xarray import corr
 
 class Pulser():
-    def __init__(self,config) -> None:
+    def __init__(self,config,measpulse = 'readout_pulse_10us') -> None:
         self.config=config
 
         self.channels=['ch1','ch2']
         
-        self.channel_dict={'ch1':'gate_36' , 'ch2':'gate_29', 'm11':'bottom_right_DQD_readout'}
+        self.channel_dict={'ch1':'gate_36' , 'ch2':'gate_29', 'm11':'bottom_right_DQD_readout' , 'm22':'bottom_right_DQD_readout'}
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
         
         self.cw_conversion=1/config['waveforms']['const_wf']['sample']
-        self.readout_length=config['pulses']['readout_pulse_10us']['length']
+        self.readout_length=config['pulses'][measpulse]['length']
         print(f'readout length: {self.readout_length}ns')
 
         # self.open_qm(config)
@@ -218,7 +218,7 @@ class Pulse_builder():
 
     def make_dict(self,df,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True):
         df = df.copy()
-        self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i]
+        self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i or 'm22' in i]
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
         self.next_loop_index = {}
 
@@ -342,9 +342,11 @@ class Pulse_builder():
             return self._ramp_action(channel,rate,row['time'])
 
         if action=='meas':
+            # print(f'{row},{channel}')
             if channel=='m11':
                 mtype = 'full'
             elif channel=='m22':
+                # print('h')
                 mtype = 'sliced'
 
             return self._meas_action(channel,mtype,self.measpulse,)
@@ -369,8 +371,6 @@ class Pulse_builder():
         return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index[channel]-1)
 
     def _make_zero_avg(self,df,channel,correction_length=30000):
-        # other_cols=[i for i in df.columns.values if 'ch' not in i and 'm1' not in i and 'm2' not in i]
-        # channel_df=df[[channel]+other_cols].copy(deep=True)
         correction_length=correction_length/4
         total_offset=0
         for index,row in df.iterrows():
