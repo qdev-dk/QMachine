@@ -74,7 +74,7 @@ class Pulser():
         self.cw_conversion=1/self.config['waveforms']['const_wf']['sample']
 
 
-    def build_seq(self,actions,buffer_size=0):
+    def build_seq(self,actions,buffer_size=0,average=False):
         temp_actions=actions.copy()
         with program() as sequence:
             # self.cw_conversion_dec =declare(fixed,value=self.cw_conversion)
@@ -87,7 +87,7 @@ class Pulser():
             else:
                 self._run_all_actions(temp_actions) #if no loops are to be done it will just run all the actions.
 
-            self._do_stream_processing(temp_actions,buffer_size)
+            self._do_stream_processing(temp_actions,buffer_size,average)
         return sequence, temp_actions
 
     def _run_loops(self,loop_indexes,actions,loop_nr=0):
@@ -199,15 +199,20 @@ class Pulser():
             save(variables['save_I'],variables['save_I_stream'])
             save(variables['save_Q'],variables['save_Q_stream'])
 
-    def _do_stream_processing(self,actions,buffer_size):
+    def _do_stream_processing(self,actions,buffer_size,average=False):
         with stream_processing():
             for step,row_actions in actions['steps'].items():
                 for key,channel_actions in row_actions.items():
                     if 'm' in key:
                         if buffer_size!=0:
                             #some more things to be implemented: averaging, figure out buffer size rework
-                            channel_actions['action_variables']['save_I_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['I_name']) #
-                            channel_actions['action_variables']['save_Q_stream'].buffer(*channel_actions['action_variables']['buffer_size']).save_all(channel_actions['action_variables']['Q_name'])
+                            if not average:
+                                channel_actions['action_variables']['save_I_stream'].buffer(*buffer_size).save_all(channel_actions['action_variables']['I_name']) #
+                                channel_actions['action_variables']['save_Q_stream'].buffer(*buffer_size).save_all(channel_actions['action_variables']['Q_name'])
+                            if average:
+                                channel_actions['action_variables']['save_I_stream'].buffer(*buffer_size).average().save(channel_actions['action_variables']['I_name']) #
+                                channel_actions['action_variables']['save_Q_stream'].buffer(*buffer_size).average().save(channel_actions['action_variables']['Q_name'])
+                        
                         else:
                             channel_actions['action_variables']['save_I_stream'].save_all(channel_actions['action_variables']['I_name']) #
                             channel_actions['action_variables']['save_Q_stream'].save_all(channel_actions['action_variables']['Q_name'])
