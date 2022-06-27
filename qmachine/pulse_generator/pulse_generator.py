@@ -17,7 +17,7 @@ class Pulser():
 
         self.channels=['ch1','ch2']
         
-        self.channel_dict={'ch1':'gate_36' , 'ch2':'gate_29', 'm11':'bottom_right_DQD_readout' , 'm22':'bottom_right_DQD_readout'}
+        self.channel_dict={'ch1':'gate_36' , 'ch2':'gate_29', 'm11':'bottom_right_DQD_readout' , 'm22':'bottom_right_DQD_readout'}#{'ch1':'Q1_L' , 'ch2':'Q1_R', 'm11':'Q1_readout' , 'm22':'Q1_readout'} #
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
@@ -25,6 +25,7 @@ class Pulser():
         self.cw_conversion=1/config['waveforms']['const_wf']['sample']
         self.readout_length=config['pulses'][measpulse]['length']
         print(f'readout length: {self.readout_length}ns')
+        self.measpulse = measpulse
 
         # self.open_qm(config)
 
@@ -117,7 +118,11 @@ class Pulser():
             for key,channel_actions in row_actions.items():
                 if 'ch' in key:
                     if channel_actions['looped']: #declare only looped parameters
-                        channel_actions['loop_param']=declare(fixed,value=channel_actions['action_variables'][channel_actions['looper']])
+                        if channel_actions['looper']=='time':
+                            # print(channel_actions['action_variables'][channel_actions['looper']])
+                            channel_actions['loop_param']=declare(int,value=channel_actions['action_variables'][channel_actions['looper']])
+                        else:
+                            channel_actions['loop_param']=declare(fixed,value=channel_actions['action_variables'][channel_actions['looper']])
         return loop_indexes,actions
 
     def _declare_measurements(self,actions):
@@ -271,14 +276,17 @@ class Pulse_builder():
         return self.actions_dict, df
 
     def _str_time_to_int(self,input):
+        # print(input)
         if isinstance(input,float):
             input=[int(input*1000/4)]
             return input
         input = input.split(',')
         input = [float(i) for i in input]
+        # print(input)
         for i,n in enumerate(input):
             if i<2:
                 input[i]=int(n*1000/4)
+                # print(input[i])
             if i>=2:
                 input[i]=int(n)
         return input
@@ -394,7 +402,7 @@ class Pulse_builder():
                 # print('h')
                 mtype = 'sliced'
 
-            return self._meas_action(channel,mtype,self.measpulse)
+            return self._meas_action(channel,mtype,pulse=self.measpulse)
 
         if action=='loop': #(!1)
             startvalue=row[channel][0]-self.current_position[channel][-1]
@@ -410,7 +418,7 @@ class Pulse_builder():
 
         if action=='time_loop':
             # step = str(row[0])
-            values = np.linspace(*row['time'])
+            values = (np.linspace(row['time'][0]*4,row['time'][1]*4,row['time'][2],dtype=int)//4).tolist()
             if self.in_loop['time']: #for now i assume only 1 time loop
                 self.in_loop[channel]=False
                 loop_index = self.next_loop_index[channel]-1

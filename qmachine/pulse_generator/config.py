@@ -185,7 +185,7 @@ config = {
 
     "waveforms": {
 
-        "const_wf": {"type": "constant", "sample": 0.1}, #previously this "sample": 0.05*7.063 
+        "const_wf": {"type": "constant", "sample": 0.25}, #previously this "sample": 0.05*7.063 
 
         "zero_wf": {"type": "constant", "sample": 0.0},
         
