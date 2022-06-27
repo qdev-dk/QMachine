@@ -223,7 +223,7 @@ class Pulse_builder():
 
     def make_dict(self,df,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True):
         df = df.copy()
-        self.channels = [i for i in df.columns.values if 'ch' in i or 'm11' in i or 'm22' in i]
+        self.channels = ['ch1','ch2','m11','m22','time']
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
         self.next_loop_index = {}
 
@@ -231,18 +231,21 @@ class Pulse_builder():
         if averages!=0:
             self.actions_dict['looped'].append(averages)
 
-        df['time'] = df['time'].map(lambda x : int(x/4*1000)) #time from us to clockcycles
+        df['time'] = df['time'].map(self._str_time_to_int) #time from us to clockcycles
         for channel in self.channels:
+            self.next_loop_index[channel] = 0
+            if averages!=0:
+                self.next_loop_index[channel]+=1
+
             if 'ch' in channel:
-                self.next_loop_index[channel] = 0
-                if averages!=0:
-                    self.next_loop_index[channel]+=1
                 df[channel] = df[channel].map(self._str_to_float)
                 df[channel] = df[channel].map(self._apply_dividers(channel))
 
         self.in_loop = {ch : False for ch in self.channels}
-        self.containts_loops = {ch : False for ch in self.channels}
+        self.contains_loops = {ch : False for ch in self.channels}
         self.measpulse = measpulse
+
+        
 
         for index,row in df.iterrows():
             self.actions_dict['steps'][str(index+1)]=self._identify_actions(row)
@@ -261,11 +264,24 @@ class Pulse_builder():
                 if 'ch' in channel:
                     self.actions_dict['steps'][str(index)][channel]=self._ramp_to_zero_action(channel)
 
-        if any(list(self.containts_loops.values())):
+        if any(list(self.contains_loops.values())):
             if zero_offset:
                 print('WARNING: Making zero offset is only done with innermost loop.') 
         
         return self.actions_dict, df
+
+    def _str_time_to_int(self,input):
+        if isinstance(input,float):
+            input=[int(input*1000/4)]
+            return input
+        input = input.split(',')
+        input = [float(i) for i in input]
+        for i,n in enumerate(input):
+            if i<2:
+                input[i]=int(n*1000/4)
+            if i>=2:
+                input[i]=int(n)
+        return input
 
     def _str_to_float(self,input):
         input = input.split(',')
@@ -298,7 +314,7 @@ class Pulse_builder():
     def _zero_avg_action(self,df,channel,correction_length=30000):
         corr_value = self._make_zero_avg(df,channel,correction_length)
         corr_value = corr_value - self.current_position[channel][-1]
-        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looper':'step_value','looped':self.containts_loops[channel],'loop_index':str(len(self.actions_dict['looped'])-1)}
+        return {'action':'step','channel':channel,'action_variables':{'time':int(correction_length/4),'step_value':corr_value},'looper':'step_value','looped':self.contains_loops[channel],'loop_index':str(len(self.actions_dict['looped'])-1)}
 
     def _identify_actions(self,row):
         actions={}
@@ -309,11 +325,13 @@ class Pulse_builder():
         return actions
 
     def _channel_action(self,input,channel):
-        if 'm' in channel:
+        if channel == 'm11' or channel == 'm22':
             if input:
                 return 'meas' 
             else:
                 return 'do_nothing'
+        elif channel == 'time':
+            return 'do_nothing'
         else:
             if len(input)==1: #step or hold
                 if self.in_loop:
@@ -332,19 +350,28 @@ class Pulse_builder():
 
     def _get_variables(self,action,row,channel):
         if action=='hold':
-            return self._hold_action(channel,row['time'])
+            return self._hold_action(channel,row['time'][0])
 
         if action=='step':
             if self.in_loop[channel]:
+                #this is likely a bit of a cut corner and if there are segments occuring inbetween finishing the loop, it is not correct
                 return self._looped_return_step(row,channel)
             step=row[channel][0]-self.current_position[channel][-1]
             self.current_position[channel].append(row[channel][0]) #update position
-            return self._step_action(channel,step,row['time'])
+            # if len(row['time'])==3:
+            #     else len(self.actions_dict['looped'])<=self.next_loop_index[channel]:
+            #         self.actions_dict['looped'].append(int(steps))
+
+            #     self.in_loop['time']=True
+            #     self.contains_loops['time']=True
+            #     time_steps = np.linspace(row['time'][0],row['time'][1],row['time'][2])
+            #     return self._step_action(channel,step,time=time_steps,looped=True,looped_variable='time',loop_index=self.next_loop_index[channel])
+            return self._step_action(channel,step,row['time'][0])
 
         if action=='ramp':
-            rate=(row[channel][1]-self.current_position[channel][-1])/(row['time']*4) #times 4 to account for clockcycles to ns
+            rate=(row[channel][1]-self.current_position[channel][-1])/(row['time'][0]*4) #times 4 to account for clockcycles to ns
             self.current_position[channel].append(row[channel][1])
-            return self._ramp_action(channel,rate,row['time'])
+            return self._ramp_action(channel,rate,row['time'][0])
 
         if action=='meas':
             # print(f'{row},{channel}')
@@ -354,7 +381,7 @@ class Pulse_builder():
                 # print('h')
                 mtype = 'sliced'
 
-            return self._meas_action(channel,mtype,self.measpulse,)
+            return self._meas_action(channel,mtype,self.measpulse)
 
         if action=='loop':
             startvalue=row[channel][0]-self.current_position[channel][-1]
@@ -363,28 +390,29 @@ class Pulse_builder():
             if len(self.actions_dict['looped'])<=self.next_loop_index[channel]:
                 self.actions_dict['looped'].append(int(steps))
             self.in_loop[channel]=True
-            self.containts_loops[channel]=True
+            self.contains_loops[channel]=True
             values = np.linspace(startvalue,endvalue,int(steps))
             self.current_position[channel].append(values)
-            return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index[channel])
+            return self._step_action(channel,values,row['time'][0],looped='True',loop_index=self.next_loop_index[channel])
 
     def _looped_return_step(self,row,channel):
         values = row[channel][0]-self.current_position[channel][-1]
         self.current_position[channel].append(row[channel][0])
         self.next_loop_index[channel]+=1
         self.in_loop[channel]=False
-        return self._step_action(channel,values,row['time'],looped='True',loop_index=self.next_loop_index[channel]-1)
+        return self._step_action(channel,values,row['time'][0],looped='True',loop_index=self.next_loop_index[channel]-1)
 
     def _make_zero_avg(self,df,channel,correction_length=30000):
+        
         correction_length=correction_length/4
         total_offset=0
         for index,row in df.iterrows():
             if len(row[channel])==1:
-                total_offset+=row[channel][0]*row['time']
+                total_offset+=row[channel][0]*row['time'][0]
             if len(row[channel])==2:
-                total_offset+=(row[channel][1]+row[channel][0])/2*row['time'] #ramp
+                total_offset+=(row[channel][1]+row[channel][0])/2*row['time'][0] #ramp
             if len(row[channel])==3:
-                total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*row['time']
+                total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*row['time'][0]
 
         # print(f'{channel} correction: {-total_offset/correction_length}')
         return -total_offset/correction_length
