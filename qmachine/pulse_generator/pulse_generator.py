@@ -111,7 +111,7 @@ class Pulser():
                     if channel_actions['looped']: #if a variable is looped it will have the different values it takes declared as an array on the OPX, this will tell python what that OPX variable is.
                         if isinstance(channel_actions['loop_index'],list):# this case is likely only relevant for the corrD pulse with multiple loops.
                             qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
-                            list_of_indexes = itemgetter(*channel_actions['loop_index'])(qua_loop_indexes)
+                            list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
                             channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[0]]
                         else:
                             channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
@@ -709,7 +709,7 @@ class Pulse_builder():
     def _add_time_loop(self,values,channel,loop_index,actions):
         actions[channel]['looper']='time'
         actions[channel]['looped']=True
-        actions[channel]['loop_index']=str(loop_index)
+        actions[channel]['loop_index']=str(int(loop_index))
         actions[channel]['action_variables']['time']=values
         return actions
         
