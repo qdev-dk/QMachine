@@ -203,6 +203,7 @@ class Pulser():
             with for_(self.sliced_indexer,0,self.sliced_indexer<variables['slices'],self.sliced_indexer+1):
                 save(variables['save_I'][self.sliced_indexer],variables['save_I_stream'])
                 save(variables['save_Q'][self.sliced_indexer],variables['save_Q_stream'])
+                wait(10) #this is added to account for the stream saving rate. 
 
         else:
             measure(variables['pulse'],self.channel_dict[channel],None,
@@ -694,7 +695,7 @@ class Pulse_builder():
             self.in_loop[channel]=True
             self.contains_loops[channel]=True
             values = np.linspace(startvalue,endvalue,int(steps))
-            self.current_position[channel].append(np.linspace(*row[channel]))
+            self.current_position[channel].append(np.linspace(row[channel][0],row[channel][1],int(row[channel][2])))
             return self._step_action(channel,values,row['time'][0],looped='True',loop_index=row['loops'])
 
         if action=='time_loop':
