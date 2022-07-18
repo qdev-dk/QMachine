@@ -19,7 +19,7 @@ class Pulser():
 
         self.channels = ['ch1', 'ch2']
         
-        self.channel_dict = {'ch1':'Q1_L' , 'ch2':'Q1_R', 'meas':'Q1_readout'} ##{'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}#
+        self.channel_dict = {'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}#
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
         self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
@@ -78,7 +78,7 @@ class Pulser():
 
 
     def build_seq(self,actions,buffer_size=0,average=False):
-        temp_actions=actions.copy()
+        temp_actions=deepcopy(actions)
         with program() as sequence:
             # self.cw_conversion_dec =declare(fixed,value=self.cw_conversion)
             if 'meas' in temp_actions['channels']: #changes here FB why m2?
@@ -112,7 +112,8 @@ class Pulser():
                         if isinstance(channel_actions['loop_index'],list):# this case is likely only relevant for the corrD pulse with multiple loops.
                             qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
                             list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
-                            channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[0]]
+                            print(list_of_indexes)
+                            channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[1]]
                         else:
                             channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
 
@@ -228,6 +229,8 @@ class Pulser():
                         else:
                             channel_actions['action_variables']['save_I_stream'].save_all(channel_actions['action_variables']['I_name']) #
                             channel_actions['action_variables']['save_Q_stream'].save_all(channel_actions['action_variables']['Q_name'])
+
+
 class Legacy_pulse_builder():
     def __init__(self,dividers):
         self.dividers=dividers
@@ -487,7 +490,7 @@ class Pulse_builder():
         self.dividers=dividers
         
 
-    def make_dict(self,df,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True):
+    def make_dict(self,df,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True,correction_length=30):
         df = deepcopy(df)
         self.channels = ['ch1','ch2','meas','time'] #time must be last see (!1)
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
@@ -498,17 +501,20 @@ class Pulse_builder():
             self.actions_dict['looped'].append(averages)
 
         df['time'] = df['time'].map(self._str_time_to_int) #time from us to clockcycles
+
+        if averages!=0:
+                df['loops'] = df['loops'].map(lambda x : int(x)+1 if not np.isnan(x) else np.nan)
+
         for channel in self.channels:
             # self.next_loop_index[channel] = 0
-            if averages!=0:
-                df['loops'] = df['loops'].map(lambda x : x+1)
+            
 
             if 'ch' in channel:
                 df[channel] = df[channel].map(self._str_to_float)
                 df[channel] = df[channel].map(self._apply_dividers(channel))
 
         df['loops'] = df['loops'].map(self._loops_nan_to_int)
-        df['meas'] = df['meas'].map(self._loops_nan_to_int)
+        df['meas'] = df['meas'].map(lambda x : int(x))
 
         self.in_loop = {ch : False for ch in self.channels}
         self.contains_loops = {ch : False for ch in self.channels}
@@ -522,7 +528,7 @@ class Pulse_builder():
             self.actions_dict['steps'][str(index)]={}
             for channel in self.channels:
                 if 'ch' in channel:
-                    self.actions_dict['steps'][str(index)][channel]=self._zero_avg_action(df,channel,correction_length=30000)
+                    self.actions_dict['steps'][str(index)][channel]=self._zero_avg_action(df,channel,correction_length=(correction_length*1e3))
 
         if ramp_to_zero:
             index=int(list(self.actions_dict['steps'].keys())[-1])+1
@@ -593,6 +599,9 @@ class Pulse_builder():
         corr_value = corr_value - self.current_position[channel][-1]
         if len(avg_loop_indexes)==0:
             loop_index = -1
+            corr_value = corr_value[0]
+        elif len(avg_loop_indexes)==1:  #1 loop only
+            loop_index=str(int(avg_loop_indexes[0][0]))
         else:
             loop_index=[(str(int(loop_index[0])),int(loop_index[1])) for loop_index in avg_loop_indexes]
         
@@ -652,6 +661,8 @@ class Pulse_builder():
 
         if action=='step':
             if self.in_loop[channel]:
+                if np.isnan(row['loops']):
+                    raise Exception('loop not specified on return step, will have to fix it later, for now, specify in row')
                 # print(action,channel,row)
                 #this is likely a bit of a cut corner and if there are segments occuring inbetween finishing the loop, it is not correct
                 return self._looped_return_step(row,channel)
@@ -683,7 +694,7 @@ class Pulse_builder():
             self.in_loop[channel]=True
             self.contains_loops[channel]=True
             values = np.linspace(startvalue,endvalue,int(steps))
-            self.current_position[channel].append(values)
+            self.current_position[channel].append(np.linspace(*row[channel]))
             return self._step_action(channel,values,row['time'][0],looped='True',loop_index=row['loops'])
 
         if action=='time_loop':
