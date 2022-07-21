@@ -1,6 +1,6 @@
 # from config import config
 from copy import deepcopy
-from qm.qua import program,for_,stream_processing,declare,declare_stream,wait,measure,play,save,fixed,demod,ramp,amp,if_,elif_,else_,align, ramp_to_zero
+from qm.qua import program, for_, stream_processing, switch_, case_, declare, declare_stream, wait, measure, play, save, fixed, demod, ramp, amp, if_, elif_, else_, align, ramp_to_zero
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
 from qm import generate_qua_script
@@ -22,7 +22,12 @@ class Pulser():
         self.channel_dict = {'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}#
         self.meas_dict={'full':demod.full , 'sliced':demod.sliced}
 
-        self.action_dict={'hold':self._make_wait , 'step':self._make_step , 'ramp':self._make_ramp, 'meas':self._make_meas,'ramp_to_zero':self._make_ramp_to_zero}
+        self.action_dict={'hold':self._make_wait,
+                          'step':self._make_step,
+                          'ramp':self._make_ramp,
+                          'meas':self._make_meas,
+                          'ramp_to_zero':self._make_ramp_to_zero,
+                          'baked_waveform':self._build_arbitrary_waveform}
         
         self.cw_conversion=1/config['waveforms']['const_wf']['sample']
         self.readout_length=config['pulses'][measpulse]['length']
@@ -112,10 +117,17 @@ class Pulser():
                         if isinstance(channel_actions['loop_index'],list):# this case is likely only relevant for the corrD pulse with multiple loops.
                             qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
                             list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
-                            print(list_of_indexes)
                             channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[1]]
                         else:
-                            channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
+                            if channel_actions['action']=='baked_waveform': #handling baked waveform looping
+                                with switch_(loop_indexes[channel_actions['loop_index']]):
+                                    for j in range(actions['looped'][int(channel_actions['loop_index'])]):
+                                        with case_(j):
+                                            channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][j]
+                                            self._perform_action(channel_actions)
+                                continue
+                            else: #regular single loop and non baked waveform.
+                                channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
 
                     self._perform_action(channel_actions) 
 
@@ -129,6 +141,8 @@ class Pulser():
                         if channel_actions['looper']=='time':
                             # print(channel_actions['action_variables'][channel_actions['looper']])
                             channel_actions['loop_param']=declare(int,value=channel_actions['action_variables'][channel_actions['looper']])
+                        if channel_actions['looper']=='waveform': #for arbitrary waveforms being looped
+                            channel_actions['loop_param']=channel_actions['action_variables'][channel_actions['looper']]
                         else:
                             channel_actions['loop_param']=declare(fixed,value=channel_actions['action_variables'][channel_actions['looper']])
         return loop_indexes,actions
@@ -192,6 +206,9 @@ class Pulser():
 
     def _make_ramp_to_zero(self,channel,variables):
         ramp_to_zero(self.channel_dict[channel],variables['time'])
+
+    def _build_arbitrary_waveform(self,channel,variables):
+        variables['waveform'].run()
 
     def _make_meas(self,channel,variables):
         if variables['type']=='sliced':
