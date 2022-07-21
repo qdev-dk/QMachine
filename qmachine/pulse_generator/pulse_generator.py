@@ -1,6 +1,6 @@
 # from config import config
 from copy import deepcopy
-from qm.qua import program, for_, stream_processing, switch_, case_, declare, declare_stream, wait, measure, play, save, fixed, demod, ramp, amp, if_, elif_, else_, align, ramp_to_zero
+from qm.qua import program, for_, reset_phase, stream_processing, switch_, case_, declare, declare_stream, wait, measure, play, save, fixed, demod, ramp, amp, if_, elif_, else_, align, ramp_to_zero
 from qm.QuantumMachinesManager import QuantumMachinesManager
 from qm import SimulationConfig
 from qm import generate_qua_script
@@ -44,110 +44,157 @@ class Pulser():
         samples = job.get_simulated_samples()
         samples.con1.plot()
         # fig,ax=self._plot_simulated_pulse(samples)
-        return job, samples ,(fig,ax)
+        return job, samples, (fig, ax)
 
-    def seq_to_py(self,seq,filename):
-        with open(filename,'w') as file:
-            print(generate_qua_script(seq,self.config) , file = file)
+    def seq_to_py(self, seq, filename):
+        with open(filename, 'w') as file:
+            print(generate_qua_script(seq, self.config), file=file)
     
-    def _plot_simulated_pulse(self,samples,meas_channel=1):
-        fig,ax=plt.subplots()
-        ax2=ax.twinx()
-        measurement_on_points=np.where(samples.con1.analog[str(meas_channel)]!=0)
-        ax.plot(samples.con1.analog['3'],label='ch2')
-        ax.plot(samples.con1.analog['2'],label='ch1')
+    def _plot_simulated_pulse(self, samples, meas_channel=1):
+        fig, ax = plt.subplots()
+        ax2 = ax.twinx()
+        measurement_on_points = np.where(samples.con1.analog[str(meas_channel)] != 0)
+        ax.plot(samples.con1.analog['3'], label='ch2')
+        ax.plot(samples.con1.analog['2'], label='ch1')
         # ax.hlines(0,0,len(samples.con1.analog['3']))
         # fig.canvas.draw()
         # y_ticks=ax.get_yticklabels()
         # ax.set_yticklabels([float(y_tick.get_text())*1e3 for y_tick in y_ticks])
         # ax.set_ylabel('mV')
-        ax2.plot(measurement_on_points,np.ones(len(measurement_on_points)),'.')
-        ax2.set_ylim(0,1.05)
+        ax2.plot(measurement_on_points, np.ones(len(measurement_on_points)), '.')
+        ax2.set_ylim(0, 1.05)
         fig.legend()
         plt.show()
-        return fig,ax
+        return fig, ax
         
-        
-
-
-    def open_qm(self,config,close_others=False):
-        #load the quantum machine this should probably only be done when simulating/performing the pulse
-        self.config=config
-        self.qmm = QuantumMachinesManager(host='192.168.15.128',port=80)
+    def open_qm(self, config, close_others=False):
+        # load the quantum machine this should probably only be done when simulating/performing the pulse
+        self.config = config
+        self.qmm = QuantumMachinesManager(host='192.168.15.128', port=80)
         if close_others:
             self.qmm.close_all_quantum_machines()
-        self.qm = self.qmm.open_qm(config,close_other_machines=False)
+        self.qm = self.qmm.open_qm(config, close_other_machines=False)
         print(f"quantum machine opened with channels {list(self.config['elements'].keys())}")
         print(f"default value for CW is: {self.config['waveforms']['const_wf']['sample']}")
-        self.cw_conversion=1/self.config['waveforms']['const_wf']['sample']
+        self.cw_conversion = 1/self.config['waveforms']['const_wf']['sample']
 
+    def build_seq(self, actions, buffer_size=0, average=False):
+        temp_actions = deepcopy(actions)
 
-    def build_seq(self,actions,buffer_size=0,average=False):
-        temp_actions=deepcopy(actions)
         with program() as sequence:
             # self.cw_conversion_dec =declare(fixed,value=self.cw_conversion)
-            if 'meas' in temp_actions['channels']: #changes here FB why m2?
+            if 'meas' in temp_actions['channels']:  # changes here FB why m2?
                 temp_actions = self._declare_measurements(temp_actions)
 
-            if 'looped' in temp_actions.keys(): #changes here
-                loop_indexes,temp_actions = self._declare_loops(temp_actions) #declare loop variables and return dict with loop indexes. and arrays to be looped over.       
-                self._run_loops(loop_indexes=loop_indexes,actions=temp_actions,loop_nr=0) #run_loops will run a single with for_ loop and call itself within this loop. run_loops also will can _run_all_actions.
+            if 'looped' in temp_actions.keys():  # changes here
+                self.loops = temp_actions['looped']
+                loop_indexes, temp_actions = self._declare_loops(temp_actions)  # declare loop variables and return dict with loop indexes. and arrays to be looped over.       
+                self._run_loops(loop_indexes=loop_indexes, actions=temp_actions, loop_nr=0)  # run_loops will run a single with for_ loop and call itself within this loop. run_loops also will can _run_all_actions.
             else:
-                self._run_all_actions(temp_actions) #if no loops are to be done it will just run all the actions.
+                self._run_all_actions(temp_actions)  # if no loops are to be done it will just run all the actions.
 
-            self._do_stream_processing(temp_actions,buffer_size,average)
+            self._do_stream_processing(temp_actions, buffer_size, average)
         return sequence, temp_actions
 
-    def _run_loops(self,loop_indexes,actions,loop_nr=0):
-        #check if we are still supposed to loop more
-        if loop_nr<len(loop_indexes): 
-            loop_index=loop_indexes[str(loop_nr)]
-            with for_(loop_index,0,loop_index<actions['looped'][int(loop_nr)],loop_index+1): #setup the loop
-                loop_nr+=1
-                self._run_loops(loop_indexes,actions,loop_nr) #call itself again going a loop deeper each time.
-        else: #if no more looping.
-            self._run_all_actions(actions,loop_indexes)
+    def _run_loops(self, loop_indexes, actions, loop_nr=0):
+        # check if we are still supposed to loop more
+        if loop_nr < len(loop_indexes):
+            loop_index = loop_indexes[str(loop_nr)]
+            with for_(loop_index, 0, loop_index < actions['looped'][int(loop_nr)], loop_index+1):  # setup the loop
+                loop_nr += 1
+                self._run_loops(loop_indexes, actions, loop_nr)  # call itself again going a loop deeper each time.
+        else:  # if no more looping.
+            self._run_all_actions(actions, loop_indexes)
 
-    def _run_all_actions(self,actions,loop_indexes=None): #this will just run all the actions
-        for step,row_actions in actions['steps'].items():
+    def _run_all_actions(self, actions, loop_indexes=None):  # this will just run all the actions
+        for step, row_actions in actions['steps'].items():
             align(*[self.channel_dict[channel] for channel in row_actions.keys()])
-            for key,channel_actions in row_actions.items(): #key should be changed to channel here
+            for key, channel_actions in row_actions.items():  # key should be changed to channel here
                 if ('ch' in key or 'm' in key):
-                    if channel_actions['looped']: #if a variable is looped it will have the different values it takes declared as an array on the OPX, this will tell python what that OPX variable is.
-                        if isinstance(channel_actions['loop_index'],list):# this case is likely only relevant for the corrD pulse with multiple loops.
-                            qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
-                            list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
-                            channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[1]]
+                    if channel_actions['looped']:  # if a variable is looped it will have the different values it takes declared as an array on the OPX, this will tell python what that OPX variable is.
+                        if isinstance(channel_actions['loop_index'], list):
+                            if channel_actions['action'] == 'step':  # this case is likely only relevant for the corrD pulse with multiple loops.
+                                # this case should be reworked to work like the others
+                                qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
+                                list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
+                                channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][channel_actions['looper']][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[1]]
+                            elif isinstance(channel_actions['looper'], list):  # this should be the general case
+                                waveform_loop = False
+                                for i, looper in enumerate(channel_actions['looper']):
+                                    if looper == 'waveform':
+                                        waveform_loop = True
+                                        waveform_loop_index = i
+                                        continue
+                                    else:
+                                        self._assign_looper(looper, channel_actions, loop_indexes[channel_actions['loop_index'][i]])
+                                
+                                if waveform_loop:
+                                    with switch_(loop_indexes[channel_actions['loop_index'][waveform_loop_index]], unsafe=True):
+                                        for j in range(actions['looped'][int(channel_actions['loop_index'][waveform_loop_index])]):
+                                            with case_(j):
+                                                self._assign_looper('waveform', channel_actions, j)
+                                                # channel_actions['action_variables']['waveform'] = channel_actions['loop_param']['waveform'][j]
+                                                self._perform_action(channel_actions)
+                                    continue
+                                
                         else:
-                            if channel_actions['action']=='baked_waveform': #handling baked waveform looping
-                                with switch_(loop_indexes[channel_actions['loop_index']]):
+                            if channel_actions['action'] == 'baked_waveform':  # handling baked waveform looping
+                                with switch_(loop_indexes[channel_actions['loop_index']], unsafe=True):
                                     for j in range(actions['looped'][int(channel_actions['loop_index'])]):
                                         with case_(j):
-                                            channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][j]
+                                            # channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][j]
+                                            self._assign_looper('waveform', channel_actions, j)
                                             self._perform_action(channel_actions)
                                 continue
-                            else: #regular single loop and non baked waveform.
-                                channel_actions['action_variables'][channel_actions['looper']]=channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
+                            else:  # regular single loop and non baked waveform.
+                                self._assign_looper(channel_actions['looper'], channel_actions, loop_indexes[channel_actions['loop_index']])
+                                # channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
 
-                    self._perform_action(channel_actions) 
+                    self._perform_action(channel_actions)
 
-    def _declare_loops(self,actions):
-        loop_indexes={str(i):declare(int) for i in range(len(actions['looped']))} #declares all the loop indexes
+    def _assign_looper(self, looper, channel_actions, loop_index):
+        # if channel_actions['action'] == 'baked_waveform':  # handling baked waveform looping
+        #     with switch_(loop_index, unsafe=True):
+        #         for j in range(actions['looped'][int(channel_actions['loop_index'])]):
+        #             with case_(j):
+        #                 channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][j]
+        #                 self._perform_action(channel_actions)
+        channel_actions['action_variables'][looper] = channel_actions['loop_param'][looper][loop_index]
 
-        for step,row_actions in actions['steps'].items():
-            for key,channel_actions in row_actions.items():
+
+    def _declare_loops(self, actions):
+        loop_indexes = {str(i): declare(int) for i in range(len(actions['looped']))}  # declares all the loop indexes
+
+        for step, row_actions in actions['steps'].items():
+            for key, channel_actions in row_actions.items():
                 if 'ch' in key:
-                    if channel_actions['looped']: #declare only looped parameters
-                        if channel_actions['looper']=='time':
-                            # print(channel_actions['action_variables'][channel_actions['looper']])
-                            channel_actions['loop_param']=declare(int,value=channel_actions['action_variables'][channel_actions['looper']])
-                        if channel_actions['looper']=='waveform': #for arbitrary waveforms being looped
-                            channel_actions['loop_param']=channel_actions['action_variables'][channel_actions['looper']]
+                    if channel_actions['looped']:  # declare only looped parameters
+                        if isinstance(channel_actions['looper'],list):
+                            for looper in channel_actions['looper']:
+                                self._declare_single_loop(looper, channel_actions)
                         else:
-                            channel_actions['loop_param']=declare(fixed,value=channel_actions['action_variables'][channel_actions['looper']])
-        return loop_indexes,actions
+                            self._declare_single_loop(channel_actions['looper'], channel_actions)
 
-    def _declare_measurements(self,actions):
+                        # if channel_actions['looper']=='time':
+                        #     # print(channel_actions['action_variables'][channel_actions['looper']])
+                        #     channel_actions['loop_param']=declare(int,value=channel_actions['action_variables'][channel_actions['looper']])
+                        # if channel_actions['looper']=='waveform': #for arbitrary waveforms being looped
+                        #     channel_actions['loop_param']=channel_actions['action_variables'][channel_actions['looper']]
+                        # else:
+                        #     channel_actions['loop_param']=declare(fixed,value=channel_actions['action_variables'][channel_actions['looper']])
+        return loop_indexes, actions
+
+    def _declare_single_loop(self, looper, channel_actions):
+        if 'loop_param' not in channel_actions:
+            channel_actions['loop_param'] = {}
+        if looper == 'time':
+            channel_actions['loop_param'][looper] = declare(int, value=channel_actions['action_variables'][looper])
+        if looper == 'waveform':  # for arbitrary waveforms being looped
+            channel_actions['loop_param'][looper] = channel_actions['action_variables'][looper]
+        else:
+            channel_actions['loop_param'][looper] = declare(fixed, value=channel_actions['action_variables'][looper])
+
+    def _declare_measurements(self, actions):
         k=1
         for step,row_actions in actions['steps'].items():
             for key,channel_actions in row_actions.items():
@@ -208,7 +255,11 @@ class Pulser():
         ramp_to_zero(self.channel_dict[channel],variables['time'])
 
     def _build_arbitrary_waveform(self,channel,variables):
-        variables['waveform'].run()
+        # if not variables['step_value']==1:
+        amp_array = [(gate,variables['step_value']) for gate in itemgetter(*self.channels)(self.channel_dict)]
+        variables['waveform'].run(amp_array=amp_array)
+        # else:
+            # variables['waveform'].run()
 
     def _make_meas(self,channel,variables):
         if variables['type']=='sliced':
@@ -229,6 +280,7 @@ class Pulser():
 
             save(variables['save_I'],variables['save_I_stream'])
             save(variables['save_Q'],variables['save_Q_stream'])
+        reset_phase(self.channel_dict[channel])
 
     def _do_stream_processing(self,actions,buffer_size,average=False):
         with stream_processing():
