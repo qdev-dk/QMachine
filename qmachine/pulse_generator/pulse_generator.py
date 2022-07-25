@@ -17,10 +17,10 @@ from xarray import corr
 from time import perf_counter
 
 class Pulser():
-    def __init__(self, config, measpulse='readout_pulse_10us') -> None:
+    def __init__(self, config, measpulse='readout_pulse_10us', channel_dict = {'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}) -> None:
         self.config = config
         self.channels = ['ch1', 'ch2']
-        self.channel_dict = {'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}
+        self.channel_dict = channel_dict
         self.meas_dict = {'full': demod.full, 'sliced': demod.sliced}
         self.action_dict = {'hold': self._make_wait,
                             'step': self._make_step,
@@ -112,13 +112,17 @@ class Pulser():
                     if channel_actions['looped']:  # if a variable is looped it will have the different values it takes declared as an array on the OPX, this will tell python what that OPX variable is.
                         if isinstance(channel_actions['loop_index'], list):
                             if channel_actions['action'] == 'step':  # this case is likely only relevant for the corrD pulse with multiple loops.
+                                # pprint.pprint(channel_actions)
+                                
                                 # this case should be reworked to work like the others
                                 # qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
                                 # list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
                                 actual_index = declare(int, value = 0)
-                                for i in channel_actions['loop_index']:
-                                    assign()
-                                channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][channel_actions['looper']][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[1]]
+                                assign(actual_index,
+                                       (loop_indexes[channel_actions['loop_index'][0]] * self.loops[int(channel_actions['loop_index'][0])] +
+                                        loop_indexes[channel_actions['loop_index'][1]]))
+                                # channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][channel_actions['looper']][list_of_indexes[0]*loop_indexes[0][1]+list_of_indexes[1]]
+                                self._assign_looper(channel_actions['looper'],channel_actions,loop_index=actual_index)
                             elif isinstance(channel_actions['looper'], list):  # this should be the general case
                                 waveform_loop = False
                                 for i, looper in enumerate(channel_actions['looper']):
@@ -292,8 +296,9 @@ class Pulser():
                             channel_actions['action_variables']['save_Q_stream'].save_all(channel_actions['action_variables']['Q_name'])
 
 class Pulse_builder():
-    def __init__(self,dividers):
+    def __init__(self,dividers, channel_dict={'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}):
         self.dividers=dividers
+        self.channel_dict = channel_dict 
         
 
     def make_dict(self,df,config=None,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True,correction_length=30):
@@ -302,7 +307,7 @@ class Pulse_builder():
         df = deepcopy(df)
         self.channels = ['ch1','ch2','meas','time'] #time must be last see (!1)
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
-        self.channel_dict = {'ch1': 'gate_36', 'ch2': 'gate_29', 'meas': 'bottom_right_DQD_readout'}#
+        
 
         self.actions_dict = {'steps':{},'channels':self.channels,'looped':[]}
         if averages!=0:
@@ -614,11 +619,11 @@ class Pulse_builder():
         return self._step_action(channel,values,row['time'][0],looped='True',loop_index=row['loops'])
 
     def _make_zero_avg(self,df,channel,correction_length=30000):
-        correction_length=correction_length/4
         total_offset=0
+        correction_length=correction_length/4
         offset_shape=None
         averaging_loop_indexes = []
-
+        
         for index,row in df.iterrows():
             if not isinstance(total_offset,(float,int)):
                 offset_shape = total_offset.shape
@@ -628,11 +633,11 @@ class Pulse_builder():
             elif len(row['time'])==3:
                 time=np.linspace(*row['time'])
                 if isinstance(row['loops'], list):
-                    averaging_loop_indexes.extend(row['loops'][0])    
+                    averaging_loop_indexes.append(row['loops'][0])    
                 else:
-                    averaging_loop_indexes.extend(row['loops'])
-                if offset_shape!=None:
-                    time = time[np.newaxis,:]
+                    averaging_loop_indexes.append(row['loops'])
+                # if offset_shape!=None:
+                #     time = time[np.newaxis,:]
 
 
             if len(row[channel])==1:
@@ -641,13 +646,14 @@ class Pulse_builder():
                 total_offset+=(row[channel][1]+row[channel][0])/2*time #ramp
             if len(row[channel])==3:
                 if isinstance(row['loops'], list):
-                    averaging_loop_indexes.extend(row['loops'][1])    
+                    averaging_loop_indexes.append(row['loops'][1])    
                 else:
-                    averaging_loop_indexes.extend(row['loops'])
-                if offset_shape!=None:
-                    total_offset = np.expand_dims(total_offset,axis=len(offset_shape))
-                    value = np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))[np.newaxis,:]
-                    total_offset = total_offset + value*time
+                    averaging_loop_indexes.append(row['loops'])
+                    
+                if not isinstance(time,(float,int)):
+                    value = np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))
+                    mtime,mvalue=np.meshgrid(time,value,indexing='ij')
+                    total_offset += mtime*mvalue
                 else:
                     total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*time
 
