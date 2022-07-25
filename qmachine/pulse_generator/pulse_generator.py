@@ -112,11 +112,6 @@ class Pulser():
                     if channel_actions['looped']:  # if a variable is looped it will have the different values it takes declared as an array on the OPX, this will tell python what that OPX variable is.
                         if isinstance(channel_actions['loop_index'], list):
                             if channel_actions['action'] == 'step':  # this case is likely only relevant for the corrD pulse with multiple loops.
-                                # pprint.pprint(channel_actions)
-                                
-                                # this case should be reworked to work like the others
-                                # qua_loop_indexes = [loop_i[0] for loop_i in loop_indexes]
-                                # list_of_indexes = itemgetter(*qua_loop_indexes)(loop_indexes)
                                 actual_index = declare(int, value = 0)
                                 assign(actual_index,
                                        (loop_indexes[channel_actions['loop_index'][0]] * self.loops[int(channel_actions['loop_index'][0])] +
@@ -134,6 +129,7 @@ class Pulser():
                                         self._assign_looper(looper, channel_actions, loop_indexes[channel_actions['loop_index'][i]])
                                 
                                 if waveform_loop:
+                                    # print('here2')
                                     with switch_(loop_indexes[channel_actions['loop_index'][waveform_loop_index]], unsafe=True):
                                         for j in range(actions['looped'][int(channel_actions['loop_index'][waveform_loop_index])]):
                                             with case_(j):
@@ -142,7 +138,9 @@ class Pulser():
                                                 self._perform_action(channel_actions)
                                     continue
                         else:
+                            # print('here')
                             if channel_actions['action'] == 'baked_waveform':  # handling baked waveform looping
+                                # print('hhh')
                                 with switch_(loop_indexes[channel_actions['loop_index']], unsafe=True):
                                     for j in range(actions['looped'][int(channel_actions['loop_index'])]):
                                         with case_(j):
@@ -153,11 +151,12 @@ class Pulser():
                             else:  # regular single loop and non baked waveform.
                                 self._assign_looper(channel_actions['looper'], channel_actions, loop_indexes[channel_actions['loop_index']])
                                 # channel_actions['action_variables'][channel_actions['looper']] = channel_actions['loop_param'][loop_indexes[channel_actions['loop_index']]]
-                    print(channel_actions['action'])
+                    # print(channel_actions['action'])
                     self._perform_action(channel_actions)
 
     def _assign_looper(self, looper, channel_actions, loop_index):
         if channel_actions['action'] == 'baked_waveform' and looper == 'step_value':
+            # print('hkhk')
             channel_actions['action_variables']['step_value_ch1'] = channel_actions['loop_param'][looper]['ch1'][loop_index]
             channel_actions['action_variables']['step_value_ch2'] = channel_actions['loop_param'][looper]['ch2'][loop_index]
         else:
@@ -251,6 +250,7 @@ class Pulser():
     def _build_arbitrary_waveform(self,channel,variables):
         # if not variables['step_value']==1:
         amp_array = [(self.channel_dict['ch1'],variables['step_value_ch1']),(self.channel_dict['ch2'],variables['step_value_ch2'])]
+        # print(amp_array)
         # amp_array = [(gate,variables['step_value']) for gate,value in itemgetter(*self.channels)(self.channel_dict)]
         variables['waveform'].run(amp_array=amp_array)
         # else:
@@ -304,7 +304,12 @@ class Pulse_builder():
     def make_dict(self,df,config=None,measpulse='readout_pulse_10us',averages=0,zero_offset=True,ramp_to_zero=True,correction_length=30):
         if config != None:
             self.config = config
+
+        self.original_df = deepcopy(df)
+        # print(self.original_df)
         df = deepcopy(df)
+        
+
         self.channels = ['ch1','ch2','meas','time'] #time must be last see (!1)
         self.current_position = {channel:[0] for channel in self.channels if 'ch' in channel}
         
@@ -455,7 +460,10 @@ class Pulse_builder():
         corr_value = corr_value - self.current_position[channel][-1]
 
         if isinstance(avg_loop_indexes, list):
-            loop_index = [str(int(i)) for i in avg_loop_indexes]
+            if len(avg_loop_indexes)==1:
+                loop_index = str(int(avg_loop_indexes[0]))
+            else:
+                loop_index = [str(int(i)) for i in avg_loop_indexes]
         else:
             loop_index = str(int(avg_loop_indexes))
 
@@ -658,6 +666,7 @@ class Pulse_builder():
                     total_offset+=np.linspace(row[channel][0],row[channel][1],int(row[channel][2]))*time
 
         # print(f'{channel} correction: {-total_offset/correction_length}')
+        # print(averaging_loop_indexes)
         return (-total_offset/correction_length).flatten(),averaging_loop_indexes
 
 
@@ -675,8 +684,14 @@ class Pulse_builder():
         else:
             ch2_step_values = (row['ch2'][0]-self.current_position['ch2'][-1])*4 
 
+        
+        original_time = self.original_df['time'].iloc[int(row.name)]
+        # print(original_time)
+        original_time = original_time.split(',')
+        original_time = [float(ti) for ti in original_time]
+        
         if len(row['time']) == 1:
-            time = row['time']*4
+            time = int(original_time[0]*1000)
             if not time % 4 == 0 or time>16:
                 print(f'Padding left is enabled for baked waveform with time {time}ns')
             with baking(config, padding_method = 'left') as baked_waveforms:
@@ -687,12 +702,13 @@ class Pulse_builder():
 
                 b.play('ch1_pulse', self.channel_dict['ch1'])
                 b.play('ch2_pulse', self.channel_dict['ch2'])
-    
+                
         else:
             self.contains_loops['time']=True
-            start_time = row['time'][0]*4
-            stop_time = row['time'][1]*4
-            steps = row['time'][2]
+            start_time = int(original_time[0]*1000)
+            stop_time = int(original_time[1]*1000)
+            steps = int(original_time[2])
+            # print(start_time,stop_time,steps)
             stepsize = (stop_time-start_time) // steps
             base_length = stop_time + 4 - (stop_time % 4) 
             baked_waveforms = []
@@ -708,6 +724,7 @@ class Pulse_builder():
                     b.play('ch2_pulse', self.channel_dict['ch2'])
 
                 baked_waveforms.append(b)
+                # print(waveform)
         print(f'Baking waveforms took: {perf_counter()-start_timing:.2f}s')
         return baked_waveforms, ch1_step_values, ch2_step_values
 
