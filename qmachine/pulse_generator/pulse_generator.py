@@ -322,7 +322,11 @@ class Pulse_builder():
 
         for channel in self.channels:
             if 'ch' in channel:
-                df[channel] = df[channel].map(self._str_to_float)
+                if df[channel].dtype==float:
+                    df[channel] = df[channel].map(lambda x : [x])
+                else:
+                    df[channel] = df[channel].map(self._str_to_float)
+
                 df[channel] = df[channel].map(self._apply_dividers(channel))
 
         self.new_loops_to_int = partial(self._loops_nan_to_int,averages=averages)
