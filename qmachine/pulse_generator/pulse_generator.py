@@ -320,9 +320,6 @@ class Pulse_builder():
 
         df['time'] = df['time'].map(self._str_time_to_int) #time from us to clockcycles
 
-        if averages!=0:
-                df['loops'] = df['loops'].map(lambda x : int(x)+1 if not np.isnan(x) else np.nan)
-
         for channel in self.channels:
             if 'ch' in channel:
                 df[channel] = df[channel].map(self._str_to_float)
